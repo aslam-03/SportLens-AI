@@ -1,0 +1,38 @@
+# Node
+node_modules/
+.npm/
+.pnpm-store/
+.next/
+dist/
+build/
+.vite/
+.vercel/
+.env
+.env.*
+.env.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pytest_cache/
+.envrc
+.venv/
+*.egg-info/
+
+# Misc
+coverage/
+.pytest_cache/

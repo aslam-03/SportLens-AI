@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #0b1220;
+  color: #e2e8f0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.gradient-ring {
+  background: radial-gradient(circle at 20% 20%, rgba(14, 165, 233, 0.15), transparent 35%),
+    radial-gradient(circle at 80% 0%, rgba(34, 197, 94, 0.2), transparent 40%),
+    linear-gradient(145deg, rgba(14, 165, 233, 0.05), rgba(34, 197, 94, 0.05));
+}
+
+.card {
+  border: 1px solid rgba(226, 232, 240, 0.1);
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(10px);
+}
