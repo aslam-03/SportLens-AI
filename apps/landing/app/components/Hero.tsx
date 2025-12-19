@@ -96,7 +96,7 @@ export default function Hero() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <section className="relative flex items-start justify-center overflow-hidden bg-brand-paper min-h-[78vh] pt-6 pb-10 md:pt-10 md:pb-12">
+    <section className="relative flex items-start justify-center overflow-hidden bg-brand-paper min-h-[74vh] pt-2 pb-10 md:pt-6 md:pb-12">
       {/* Keep the hero background clean: push decorative radials higher + smaller so the space down to the scroll arrow stays mostly plain. */}
       <div className="pointer-events-none absolute inset-x-0 top-[-12rem] -z-10 h-[22rem] bg-[radial-gradient(closest-side,rgba(7,207,246,0.18),transparent)]" />
       <div className="pointer-events-none absolute inset-x-0 top-[-7rem] -z-10 h-[18rem] bg-[radial-gradient(closest-side,rgba(25,65,98,0.08),transparent)]" />
@@ -167,9 +167,9 @@ export default function Hero() {
             >
               <Link
                 href="https://app.sportlens.ai"
-                className="inline-flex items-center justify-center px-7 py-3.5 bg-brand-ink hover:bg-brand-black text-white font-semibold rounded-xl transition-colors duration-200 text-base shadow-sm"
+                className="inline-flex items-center justify-center px-7 py-3.5 bg-gradient-to-br from-brand-blue to-brand-cyan hover:shadow-lg hover:from-brand-blue hover:to-brand-cyan hover:opacity-95 text-white font-semibold rounded-xl transition-all duration-200 text-base shadow-sm"
               >
-                Launch App
+                Download App
               </Link>
               <Link
                 href="#how-it-works"

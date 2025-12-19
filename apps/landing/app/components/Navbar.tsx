@@ -33,7 +33,7 @@ export default function Navbar() {
               <Link
                 key={link.name}
                 href={link.href}
-                className="text-sm font-medium text-slate-700 hover:text-brand-blue transition-colors"
+                className="text-sm font-medium text-slate-700 hover:text-brand-blue border-b-2 border-transparent hover:border-brand-blue transition-all duration-200 pb-1"
               >
                 {link.name}
               </Link>
@@ -44,9 +44,9 @@ export default function Navbar() {
           <div className="hidden md:block">
             <Link
               href="https://app.sportlens.ai"
-              className="px-4 py-2 md:px-6 md:py-2 bg-slate-950 hover:bg-slate-900 text-white font-semibold rounded-lg transition-colors text-sm md:text-base shadow-sm"
+              className="px-4 py-2 md:px-6 md:py-2 bg-gradient-to-br from-brand-blue to-brand-cyan hover:shadow-md hover:opacity-90 text-white font-semibold rounded-lg transition-all duration-200 text-sm md:text-base shadow-sm"
             >
-              Launch App
+              Download App
             </Link>
           </div>
 
@@ -88,7 +88,7 @@ export default function Navbar() {
               <Link
                 key={link.name}
                 href={link.href}
-                className="block px-2 py-2 text-sm font-medium text-slate-700 hover:text-brand-blue transition-colors"
+                className="block px-2 py-2 text-sm font-medium text-slate-700 hover:text-brand-blue border-b-2 border-transparent hover:border-brand-blue transition-all duration-200"
                 onClick={() => setIsOpen(false)}
               >
                 {link.name}
@@ -96,10 +96,10 @@ export default function Navbar() {
             ))}
             <Link
               href="https://app.sportlens.ai"
-              className="block w-full px-4 py-2 bg-slate-950 hover:bg-slate-900 text-white font-semibold rounded-lg transition-colors text-sm text-center shadow-sm"
+              className="block w-full px-4 py-2 bg-gradient-to-br from-brand-blue to-brand-cyan hover:shadow-md hover:opacity-90 text-white font-semibold rounded-lg transition-all duration-200 text-sm text-center shadow-sm"
               onClick={() => setIsOpen(false)}
             >
-              Launch App
+              Download App
             </Link>
           </div>
         </motion.div>
