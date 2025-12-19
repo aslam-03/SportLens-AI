@@ -6,11 +6,15 @@
   color-scheme: light;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: #0b1220;
-  color: #e2e8f0;
+  background: #f6feff;
+  color: #04131e;
 }
 
 a {
@@ -19,13 +23,14 @@ a {
 }
 
 .gradient-ring {
-  background: radial-gradient(circle at 20% 20%, rgba(14, 165, 233, 0.15), transparent 35%),
-    radial-gradient(circle at 80% 0%, rgba(34, 197, 94, 0.2), transparent 40%),
-    linear-gradient(145deg, rgba(14, 165, 233, 0.05), rgba(34, 197, 94, 0.05));
+  background:
+    radial-gradient(circle at 20% 18%, rgba(7, 207, 246, 0.18), transparent 44%),
+    radial-gradient(circle at 82% 0%, rgba(25, 65, 98, 0.12), transparent 46%),
+    linear-gradient(145deg, rgba(7, 207, 246, 0.05), rgba(25, 65, 98, 0.03));
 }
 
 .card {
-  border: 1px solid rgba(226, 232, 240, 0.1);
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.75);
   backdrop-filter: blur(10px);
 }

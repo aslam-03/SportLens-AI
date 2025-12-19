@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import type { ReactNode } from "react";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -9,10 +10,10 @@ export const metadata: Metadata = {
   description: "Real-time AI coaching for Cricket and Fitness.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${inter.className} gradient-ring min-h-screen`}>{children}</body>
+      <body className={`${inter.className} min-h-screen bg-brand-paper text-brand-ink antialiased`}>{children}</body>
     </html>
   );
 }

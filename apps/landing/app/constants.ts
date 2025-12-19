@@ -1,4 +1,4 @@
-import { Zap, Cricket, Tool, Award, Clock, AlertCircle, TrendingDown, Target, Dumbbell, Sparkles, Camera, User, Angles, BowlingAction, BattingStance, Squat, Pushup, Feedback, Webcam, Pose, Biomechanics, ErrorDetection, Arrow } from "./icons";
+import { Zap, Cricket, Tool, Award, Clock, AlertCircle, TrendingDown, User, BowlingAction, BattingStance, Squat, Pushup, Feedback, Webcam, Pose, Biomechanics, ErrorDetection } from "./icons";
 
 export const heroMock = {
   header: "Live coaching view",
@@ -20,7 +20,7 @@ export const problems = [
 ];
 
 export const solutionFlow = [
-  { icon: Webcam, title: "Webcam on", text: "One click to start." },
+  { icon: Webcam, title: "Enable Camera", text: "Start a session in seconds." },
   { icon: Pose, title: "Pose detection", text: "Keypoints tracked live." },
   { icon: Biomechanics, title: "Biomechanics", text: "Angles & phases measured." },
   { icon: ErrorDetection, title: "Error detection", text: "Sport-specific rules." },
@@ -29,28 +29,28 @@ export const solutionFlow = [
 
 export const features = [
   {
-    title: "Real-time posture correction",
-    description: "See what to fix mid-rep so you ingrain good habits quickly.",
+    title: "Real-time coaching",
+    description: "Get clear cues while you move—fix form before mistakes repeat.",
   },
   {
-    title: "Joint angle & biomechanics insight",
-    description: "Understand alignment, ranges, and timing—no guesswork.",
+    title: "Biomechanics insights",
+    description: "Understand alignment, angles, and timing with simple on-screen guidance.",
   },
   {
-    title: "Cricket + fitness coaching",
-    description: "Tailored cues for batting, bowling, and foundational strength work.",
+    title: "Cricket-specific intelligence",
+    description: "Coaching cues tuned for batting and bowling technique—not generic analysis.",
   },
   {
-    title: "Instant AI feedback",
-    description: "On-screen overlays guide every rep while you move.",
+    title: "Fitness form correction",
+    description: "Learn fundamentals safely with posture checks for core movements.",
   },
   {
-    title: "Session tracking & analytics",
-    description: "Keep history, trends, and highlights to prove progress.",
+    title: "Session tracking",
+    description: "Review sessions and spot improvement trends over time.",
   },
   {
-    title: "No extra hardware",
-    description: "Just your camera and browser. Zero sensors or wearables.",
+    title: "No hardware required",
+    description: "Just your webcam and browser—no sensors, wearables, or setup hassle.",
   },
 ];
 
