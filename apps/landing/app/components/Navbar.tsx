@@ -8,23 +8,22 @@ export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
 
   const navLinks = [
-    { name: "How it works", href: "#solution" },
+    { name: "How it works", href: "#how-it-works" },
     { name: "Features", href: "#features" },
-    { name: "Use cases", href: "#use-cases" },
-    { name: "Product", href: "#product" },
+    { name: "Who it's for", href: "#who-its-for" },
   ];
 
   return (
-    <nav className="sticky top-0 z-50 bg-white border-b border-slate-200 backdrop-blur-sm bg-white/95">
+    <nav className="sticky top-0 z-50 border-b border-slate-200/70 bg-white/75 backdrop-blur supports-[backdrop-filter]:bg-white/60">
       <div className="mx-auto max-w-6xl px-6 py-4 md:py-5">
         <div className="flex items-center justify-between">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-sky-500 flex items-center justify-center">
-              <span className="text-white font-bold text-lg">S</span>
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-brand-blue to-brand-cyan flex items-center justify-center shadow-sm ring-1 ring-brand-cyan/30">
+              <span className="text-white font-bold text-lg leading-none">S</span>
             </div>
-            <span className="text-lg font-bold text-slate-950 hidden sm:inline">
-              SportLens
+            <span className="text-base font-bold tracking-tight text-slate-950 hidden sm:inline">
+              SportLens <span className="text-slate-500">AI</span>
             </span>
           </Link>
 
@@ -34,7 +33,7 @@ export default function Navbar() {
               <Link
                 key={link.name}
                 href={link.href}
-                className="text-sm font-medium text-slate-700 hover:text-sky-600 transition-colors"
+                className="text-sm font-medium text-slate-700 hover:text-brand-blue transition-colors"
               >
                 {link.name}
               </Link>
@@ -45,7 +44,7 @@ export default function Navbar() {
           <div className="hidden md:block">
             <Link
               href="https://app.sportlens.ai"
-              className="px-4 py-2 md:px-6 md:py-2 bg-sky-500 hover:bg-sky-600 text-white font-semibold rounded-lg transition-colors text-sm md:text-base"
+              className="px-4 py-2 md:px-6 md:py-2 bg-slate-950 hover:bg-slate-900 text-white font-semibold rounded-lg transition-colors text-sm md:text-base shadow-sm"
             >
               Launch App
             </Link>
@@ -89,7 +88,7 @@ export default function Navbar() {
               <Link
                 key={link.name}
                 href={link.href}
-                className="block px-2 py-2 text-sm font-medium text-slate-700 hover:text-sky-600 transition-colors"
+                className="block px-2 py-2 text-sm font-medium text-slate-700 hover:text-brand-blue transition-colors"
                 onClick={() => setIsOpen(false)}
               >
                 {link.name}
@@ -97,7 +96,7 @@ export default function Navbar() {
             ))}
             <Link
               href="https://app.sportlens.ai"
-              className="block w-full px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white font-semibold rounded-lg transition-colors text-sm text-center"
+              className="block w-full px-4 py-2 bg-slate-950 hover:bg-slate-900 text-white font-semibold rounded-lg transition-colors text-sm text-center shadow-sm"
               onClick={() => setIsOpen(false)}
             >
               Launch App

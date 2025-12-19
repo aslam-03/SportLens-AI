@@ -9,13 +9,15 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          primary: "#0EA5E9",
-          dark: "#0B172A",
-          accent: "#22C55E",
+          cyan: "#07cff6",
+          blue: "#194162",
+          paper: "#f6feff",
+          ink: "#04131e",
+          black: "#020204",
         },
       },
       boxShadow: {
-        glow: "0 0 30px rgba(14, 165, 233, 0.25)",
+        glow: "0 0 30px rgba(7, 207, 246, 0.22)",
       },
     },
   },
