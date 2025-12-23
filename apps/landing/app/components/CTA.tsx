@@ -19,7 +19,6 @@ export default function CTA() {
         <div className="relative">
           <div className="grid gap-8 md:grid-cols-2 md:items-center">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-brand-blue">Final CTA</p>
               <h2 className="mt-4 text-4xl md:text-5xl font-bold tracking-tight text-slate-950">
                 Train with clarity.
                 <span className="text-slate-400"> Improve with confidence.</span>
