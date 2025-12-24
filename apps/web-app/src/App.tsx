@@ -25,7 +25,7 @@ function App() {
           </div>
           <a
             className="rounded-lg border border-white/10 px-4 py-2 text-sm text-slate-100 transition hover:-translate-y-0.5 hover:border-sky-500 hover:text-sky-200"
-            href="https://sportlens.ai"
+            href="https://sport-lens-ai.vercel.app/"
             target="_blank"
             rel="noreferrer"
           >
