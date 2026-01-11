@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { initializePose, detectPose, closePose, PoseLandmarks } from "../ai/poseEstimator";
+import { drawSkeleton } from "../utils/drawSkeleton";
 
 interface CameraStatus {
   state: "idle" | "requesting" | "active" | "blocked" | "unsupported" | "stopped";
@@ -10,12 +12,22 @@ export default function LiveCoaching() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const poseInitializedRef = useRef<boolean>(false);
+  const canvasEnabledRef = useRef<boolean>(false);
 
   const [status, setStatus] = useState<CameraStatus>({
     state: "idle",
     message: "Ready to start",
   });
   const [error, setError] = useState<string | null>(null);
+  const [canvasEnabled, setCanvasEnabled] = useState<boolean>(false);
+
+  useEffect(() => {
+    canvasEnabledRef.current = canvasEnabled;
+    if (canvasRef.current) {
+      canvasRef.current.style.display = canvasEnabled ? "block" : "none";
+    }
+  }, [canvasEnabled]);
 
   // Start camera on button click
   const startCamera = async () => {
@@ -29,25 +41,140 @@ export default function LiveCoaching() {
     setError(null);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      console.log('STEP 1️⃣ getUserMedia request starting');
+      const constraints = {
         video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log('STEP 2️⃣ MediaStream received', stream);
+
+      const videoTracks = stream.getVideoTracks();
+      const audioTracks = stream.getAudioTracks();
+      console.log('🎥 videoTracks:', videoTracks);
+      console.log('🎧 audioTracks:', audioTracks);
+      if (!videoTracks.length) {
+        console.error('❌ No video tracks found in stream');
+        setStatus({ state: "blocked", message: "No video track" });
+        setError("Camera stream has no video track. Check your webcam and permissions.");
+        return;
+      }
+      videoTracks.forEach((track, idx) => {
+        const settings = track.getSettings();
+        console.log(`🎬 Video track #${idx}`, settings);
       });
 
       streamRef.current = stream;
+      console.log('STEP 3️⃣ streamRef stored. active:', stream.active, 'tracks:', stream.getTracks().length);
 
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        // Wait for video to be ready before playing
-        videoRef.current.onloadedmetadata = () => {
-          videoRef.current?.play().catch((err) => {
-            console.warn("Auto-play failed:", err);
+        const videoEl = videoRef.current;
+        videoEl.srcObject = stream;
+        console.log('STEP 4️⃣ srcObject assigned', {
+          hasVideoElement: !!videoEl,
+          inDOM: document.contains(videoEl),
+          streamActive: stream.active,
+          trackCount: stream.getTracks().length,
+        });
+
+        // Wait for video to be ready before initializing pose
+        videoEl.onloadedmetadata = async () => {
+          const video = videoRef.current;
+          if (!video) {
+            console.error('❌ videoRef missing inside onloadedmetadata');
+            return;
+          }
+          
+          console.log('STEP 5️⃣ onloadedmetadata fired');
+          console.log(`📐 Video dimensions: ${video.videoWidth}x${video.videoHeight}`);
+          console.log(`📐 Video client size: ${video.clientWidth}x${video.clientHeight}`);
+
+          // Log computed styles to ensure visibility
+          const computed = window.getComputedStyle(video);
+          console.log('🧾 Computed video style:', {
+            display: computed.display,
+            visibility: computed.visibility,
+            opacity: computed.opacity,
+            position: computed.position,
+            zIndex: computed.zIndex,
+            width: computed.width,
+            height: computed.height,
+            objectFit: computed.objectFit,
           });
+
+          // Sync canvas with video dimensions (fallback to 640x480 if 0)
+          const targetWidth = video.videoWidth || video.clientWidth || 640;
+          const targetHeight = video.videoHeight || video.clientHeight || 480;
+          if (canvasRef.current) {
+            canvasRef.current.width = targetWidth;
+            canvasRef.current.height = targetHeight;
+            console.log(`✅ Canvas synced to: ${canvasRef.current.width}x${canvasRef.current.height}`);
+            
+            // Draw a test rect to verify canvas is working
+            const ctx = canvasRef.current.getContext('2d');
+            if (ctx) {
+              ctx.fillStyle = 'rgba(7, 207, 246, 0.2)';
+              ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+              console.log('✅ Test rect drawn on canvas');
+            }
+          }
+
+          try {
+            await video.play();
+            console.log('STEP 6️⃣ video.play() resolved - video should now render');
+            console.log('🟢 Verification:', {
+              readyState: video.readyState,
+              currentTime: video.currentTime,
+              paused: video.paused,
+            });
+            
+            // Initialize pose after video is ready
+            if (videoRef.current && !poseInitializedRef.current) {
+              console.log('STEP 7️⃣ Initializing MediaPipe Pose...');
+              let detectionCount = 0;
+              await initializePose(videoRef.current, (results: PoseLandmarks) => {
+                // Callback when pose is detected
+                detectionCount++;
+                if (detectionCount % 30 === 0) {
+                  console.log(`🎯 Pose detected: ${results.landmarks?.length || 0} landmarks`);
+                }
+                
+                if (!canvasEnabledRef.current) {
+                  if (detectionCount % 30 === 0) {
+                    console.log('ℹ️ Canvas disabled; skipping draw');
+                  }
+                  return;
+                }
+
+                if (canvasRef.current && results && results.landmarks && results.landmarks.length > 0) {
+                  drawSkeleton(canvasRef.current, results, {
+                    jointRadius: 5,
+                    lineWidth: 2,
+                    jointColor: '#07cff6',
+                    lineColor: '#194162',
+                    visibilityThreshold: 0.5,
+                  });
+                  
+                  if (detectionCount % 30 === 0) {
+                    console.log(`✏️ Skeleton drawn on canvas (${canvasRef.current.width}x${canvasRef.current.height})`);
+                  }
+                }
+              });
+              poseInitializedRef.current = true;
+              console.log('STEP 8️⃣ Pose initialized, starting detection loop');
+              startPoseLoop();
+              console.log('✅ Final verification: permission granted, video track detected, srcObject set, metadata loaded, video.play succeeded. Video should be visible.');
+            }
+          } catch (err) {
+            console.error('❌ video.play() error or pose init error:', err);
+            setError('Failed to initialize pose detection');
+          }
         };
+      } else {
+        console.error('❌ videoRef missing when trying to assign srcObject');
       }
 
       setStatus({ state: "active", message: "Camera active" });
-      startOverlayAnimation();
     } catch (err) {
       const errorMsg = (err as Error).message;
       let friendlyMessage = "Camera access denied";
@@ -98,44 +225,56 @@ export default function LiveCoaching() {
 
     setStatus({ state: "stopped", message: "Camera stopped" });
     setError(null);
+
+    // Close pose estimation
+    if (poseInitializedRef.current) {
+      closePose();
+      poseInitializedRef.current = false;
+    }
   };
 
-  // Draw overlay on canvas
-  const startOverlayAnimation = () => {
-    const drawOverlay = () => {
+  // Run pose detection loop with requestAnimationFrame
+  const startPoseLoop = () => {
+    let frameCount = 0;
+    const poseLoop = async () => {
       const canvas = canvasRef.current;
       const video = videoRef.current;
-      if (!canvas || !video) return;
+      
+      if (!canvas || !video) {
+        animationFrameRef.current = requestAnimationFrame(poseLoop);
+        return;
+      }
 
-      canvas.width = video.videoWidth || video.clientWidth;
-      canvas.height = video.videoHeight || video.clientHeight;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
+      // Sync canvas size with video
+      const w = video.videoWidth || video.clientWidth;
+      const h = video.videoHeight || video.clientHeight;
+      
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        if (frameCount % 60 === 0) {
+          console.log(`📐 Canvas resized to: ${w}x${h}`);
+        }
+      }
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Clear canvas before drawing new frame
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
 
-      // Dashed center guide box (placeholder for future pose detection)
-      ctx.strokeStyle = "rgba(7, 207, 246, 0.5)";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([8, 8]);
-      ctx.strokeRect(
-        canvas.width * 0.15,
-        canvas.height * 0.15,
-        canvas.width * 0.7,
-        canvas.height * 0.7
-      );
-      ctx.setLineDash([]);
+      // Detect pose - results are passed to onResults callback from initializePose
+      await detectPose(video).catch((err) => {
+        if (frameCount % 60 === 0) {
+          console.error('Pose detection error:', err);
+        }
+      });
 
-      // Center indicator dot
-      ctx.beginPath();
-      ctx.arc(canvas.width / 2, canvas.height / 2, 6, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(7, 207, 246, 0.6)";
-      ctx.fill();
-
-      animationFrameRef.current = requestAnimationFrame(drawOverlay);
+      frameCount++;
+      animationFrameRef.current = requestAnimationFrame(poseLoop);
     };
 
-    animationFrameRef.current = requestAnimationFrame(drawOverlay);
+    animationFrameRef.current = requestAnimationFrame(poseLoop);
   };
 
   // Cleanup on unmount
@@ -147,128 +286,92 @@ export default function LiveCoaching() {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((track) => track.stop());
       }
+      if (poseInitializedRef.current) {
+        closePose();
+      }
     };
   }, []);
 
-  const getStatusColor = () => {
-    switch (status.state) {
-      case "active":
-        return "bg-emerald-500";
-      case "blocked":
-      case "unsupported":
-        return "bg-red-500";
-      case "requesting":
-        return "bg-amber-500";
-      default:
-        return "bg-slate-500";
-    }
-  };
-
-  // Show idle state with start button
-  if (status.state === "idle" || status.state === "stopped") {
-    return (
-      <div className="relative h-screen w-full overflow-hidden bg-slate-950 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-white mb-4">Live Coaching</h1>
-          <p className="text-slate-300 mb-8">Click below to start your webcam session</p>
-          <button
-            onClick={startCamera}
-            className="px-8 py-3 bg-gradient-to-br from-blue-600 to-cyan-500 hover:from-blue-700 hover:to-cyan-600 text-white font-semibold rounded-lg transition-all duration-200 shadow-lg"
-          >
-            Start Camera
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-slate-950">
-      {/* Main camera view */}
-      <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
-        {error ? (
-          <div className="flex flex-col items-center justify-center gap-4">
-            <div className="rounded-lg bg-red-500/10 p-8 text-center max-w-md">
-              <p className="text-sm font-medium text-red-200">{error}</p>
-              <button
-                onClick={() => {
-                  setError(null);
-                  setStatus({ state: "idle", message: "Ready to start" });
-                }}
-                className="mt-4 px-6 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                Try Again
-              </button>
-            </div>
-          </div>
-        ) : status.state === "requesting" ? (
-          <div className="text-center">
-            <div className="mb-4 h-16 w-16 border-4 border-slate-600 border-t-cyan-500 rounded-full animate-spin mx-auto" />
-            <p className="text-slate-300 text-sm">{status.message}</p>
-          </div>
-        ) : (
-          <div className="relative h-full w-full overflow-hidden">
-            <video
-              ref={videoRef}
-              className="h-full w-full object-cover"
-              playsInline
-              muted
-            />
-            <canvas
-              ref={canvasRef}
-              className="absolute inset-0 h-full w-full"
-            />
+    <div style={{ minHeight: "100vh", background: "#0b0c10", color: "#e5faff", padding: "16px", fontFamily: "Inter, system-ui, sans-serif" }}>
+      <h1 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "12px" }}>Live Coaching – Minimal Debug View</h1>
+      <p style={{ fontSize: "14px", marginBottom: "12px", color: "#b9d7ff" }}>
+        Minimal 640x480 sandbox (no Tailwind/conditional UI). Check console logs for step-by-step lifecycle.
+      </p>
 
-            {/* Status badge - top left */}
-            <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/40 px-3 py-2 backdrop-blur">
-              <span className={`h-2.5 w-2.5 rounded-full ${getStatusColor()} animate-pulse`} />
-              <span className="text-xs font-medium text-white">{status.message}</span>
-            </div>
+      <div
+        style={{
+          position: "relative",
+          width: "640px",
+          height: "480px",
+          margin: "0 auto 16px auto",
+          backgroundColor: "#000",
+          border: "2px solid #0ad4ff",
+          boxShadow: "0 0 0 1px rgba(0,0,0,0.4)",
+          overflow: "hidden",
+        }}
+      >
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            backgroundColor: "#000",
+            zIndex: 1,
+            display: "block",
+            opacity: 1,
+          }}
+        />
 
-            {/* Session timer - top right */}
-            <div className="absolute right-4 top-4 rounded-full bg-black/40 px-3 py-2 backdrop-blur text-xs text-slate-200">
-              Session Active
-            </div>
+        <canvas
+          ref={canvasRef}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            zIndex: 2,
+            pointerEvents: "none",
+            backgroundColor: "transparent",
+          }}
+        />
+      </div>
+
+      <div style={{ display: "flex", gap: "8px", justifyContent: "center", marginBottom: "12px" }}>
+        <button onClick={startCamera} style={{ padding: "8px 12px", background: "#0ad4ff", color: "#001018", border: "none", borderRadius: "6px", fontWeight: 700, cursor: "pointer" }}>
+          Start Camera
+        </button>
+        <button onClick={stopCamera} style={{ padding: "8px 12px", background: "#ff4d4f", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, cursor: "pointer" }}>
+          Stop Camera
+        </button>
+        <button onClick={() => setCanvasEnabled((prev) => !prev)} style={{ padding: "8px 12px", background: canvasEnabled ? "#1130ff" : "#444b5a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, cursor: "pointer" }}>
+          {canvasEnabled ? "Disable Canvas Overlay" : "Enable Canvas Overlay"}
+        </button>
+      </div>
+
+      <div style={{ maxWidth: "640px", margin: "0 auto", fontSize: "13px", lineHeight: 1.5 }}>
+        <div style={{ marginBottom: "8px" }}>
+          <strong>Status:</strong> {status.state} – {status.message}
+        </div>
+        {error && (
+          <div style={{ marginBottom: "8px", color: "#ffb3b8" }}>
+            <strong>Error:</strong> {error}
           </div>
         )}
-      </div>
-
-      {/* Right sidebar - Feedback panel */}
-      <div className="absolute right-0 top-0 h-full w-80 border-l border-slate-700 bg-slate-900/80 backdrop-blur">
-        <div className="flex h-full flex-col">
-          {/* Header */}
-          <div className="border-b border-slate-700 px-4 py-4">
-            <h2 className="text-sm font-semibold text-white">Feedback</h2>
-            <p className="mt-1 text-xs text-slate-400">Real-time coaching cues</p>
-          </div>
-
-          {/* Content area */}
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="space-y-3">
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <p className="text-xs font-medium text-slate-300">Posture</p>
-                <p className="mt-1 text-xs text-slate-400">Analyzing...</p>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <p className="text-xs font-medium text-slate-300">Form Score</p>
-                <p className="mt-1 text-xs text-slate-400">--</p>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <p className="text-xs font-medium text-slate-300">Next Cue</p>
-                <p className="mt-1 text-xs text-slate-400">Waiting...</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Footer - Stop button */}
-          <div className="border-t border-slate-700 px-4 py-3">
-            <button
-              onClick={stopCamera}
-              className="w-full rounded-lg bg-red-600 hover:bg-red-700 py-2 text-xs font-medium text-white transition-colors"
-            >
-              Stop Session
-            </button>
-          </div>
+        <div style={{ marginBottom: "4px" }}>Stream: {streamRef.current ? "✅ Active" : "❌ Inactive"}</div>
+        <div style={{ marginBottom: "4px" }}>Video Ref: {videoRef.current ? "✅ Set" : "❌ Null"}</div>
+        <div style={{ marginBottom: "4px" }}>Canvas Ref: {canvasRef.current ? "✅ Set" : "❌ Null"}</div>
+        <div style={{ marginBottom: "4px" }}>Pose Init: {poseInitializedRef.current ? "✅ Yes" : "❌ No"}</div>
+        <div style={{ marginTop: "8px", color: "#9fb6d1" }}>
+          Inspect DevTools console for lifecycle steps: getUserMedia → tracks → srcObject → onloadedmetadata → video.play → pose init.
         </div>
       </div>
     </div>
