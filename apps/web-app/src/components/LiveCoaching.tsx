@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { initializePose, detectPose, closePose, PoseLandmarks } from "../ai/poseEstimator";
 import { drawSkeleton } from "../utils/drawSkeleton";
+import { calculateBiomechanics, AngleSmoother, BiomechanicsFrame } from "../Biomechanics/angleCalculator";
 
 interface CameraStatus {
   state: "idle" | "requesting" | "active" | "blocked" | "unsupported" | "stopped";
@@ -14,6 +15,7 @@ export default function LiveCoaching() {
   const animationFrameRef = useRef<number | null>(null);
   const poseInitializedRef = useRef<boolean>(false);
   const canvasEnabledRef = useRef<boolean>(false);
+  const angleSmootherRef = useRef<AngleSmoother>(new AngleSmoother(5));
 
   const [status, setStatus] = useState<CameraStatus>({
     state: "idle",
@@ -21,6 +23,7 @@ export default function LiveCoaching() {
   });
   const [error, setError] = useState<string | null>(null);
   const [canvasEnabled, setCanvasEnabled] = useState<boolean>(false);
+  const [biomechanics, setBiomechanics] = useState<BiomechanicsFrame | null>(null);
 
   useEffect(() => {
     canvasEnabledRef.current = canvasEnabled;
@@ -138,6 +141,11 @@ export default function LiveCoaching() {
                 if (detectionCount % 30 === 0) {
                   console.log(`🎯 Pose detected: ${results.landmarks?.length || 0} landmarks`);
                 }
+
+                // Calculate and smooth biomechanics angles
+                const rawFrame = calculateBiomechanics(results, 0.3);
+                const smoothedFrame = angleSmootherRef.current.smoothFrame(rawFrame);
+                setBiomechanics(smoothedFrame);
                 
                 if (!canvasEnabledRef.current) {
                   if (detectionCount % 30 === 0) {
@@ -203,6 +211,10 @@ export default function LiveCoaching() {
       });
       streamRef.current = null;
     }
+
+    // Reset biomechanics
+    angleSmootherRef.current.reset();
+    setBiomechanics(null);
 
     // Cancel animation frame
     if (animationFrameRef.current) {
@@ -373,6 +385,61 @@ export default function LiveCoaching() {
         <div style={{ marginTop: "8px", color: "#9fb6d1" }}>
           Inspect DevTools console for lifecycle steps: getUserMedia → tracks → srcObject → onloadedmetadata → video.play → pose init.
         </div>
+      </div>
+
+      {/* Biomechanics Metrics Panel */}
+      <div style={{ maxWidth: "640px", margin: "20px auto", backgroundColor: "#0f1419", border: "1px solid #1e3a4c", borderRadius: "8px", padding: "16px" }}>
+        <h2 style={{ fontSize: "16px", fontWeight: 700, marginBottom: "12px", color: "#0ad4ff" }}>📊 Real-Time Biomechanics</h2>
+        
+        {biomechanics === null ? (
+          <p style={{ color: "#6b7280", fontSize: "13px" }}>Waiting for pose data...</p>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+            {/* Knee Angles */}
+            <div style={{ backgroundColor: "#0b0c10", padding: "12px", borderRadius: "6px", border: "1px solid #1a2332" }}>
+              <p style={{ fontSize: "12px", fontWeight: 600, color: "#7dd3fc", marginBottom: "8px" }}>🦵 Knee Angles</p>
+              <div style={{ fontSize: "13px", color: "#e5faff", marginBottom: "4px" }}>
+                Left: <span style={{ fontWeight: 700, color: "#0ad4ff" }}>{biomechanics.leftKneeAngle !== null ? Math.round(biomechanics.leftKneeAngle) + "°" : "—"}</span>
+              </div>
+              <div style={{ fontSize: "13px", color: "#e5faff" }}>
+                Right: <span style={{ fontWeight: 700, color: "#0ad4ff" }}>{biomechanics.rightKneeAngle !== null ? Math.round(biomechanics.rightKneeAngle) + "°" : "—"}</span>
+              </div>
+            </div>
+
+            {/* Hip Angles */}
+            <div style={{ backgroundColor: "#0b0c10", padding: "12px", borderRadius: "6px", border: "1px solid #1a2332" }}>
+              <p style={{ fontSize: "12px", fontWeight: 600, color: "#7dd3fc", marginBottom: "8px" }}>🪵 Hip Angles</p>
+              <div style={{ fontSize: "13px", color: "#e5faff", marginBottom: "4px" }}>
+                Left: <span style={{ fontWeight: 700, color: "#0ad4ff" }}>{biomechanics.leftHipAngle !== null ? Math.round(biomechanics.leftHipAngle) + "°" : "—"}</span>
+              </div>
+              <div style={{ fontSize: "13px", color: "#e5faff" }}>
+                Right: <span style={{ fontWeight: 700, color: "#0ad4ff" }}>{biomechanics.rightHipAngle !== null ? Math.round(biomechanics.rightHipAngle) + "°" : "—"}</span>
+              </div>
+            </div>
+
+            {/* Elbow Angles */}
+            <div style={{ backgroundColor: "#0b0c10", padding: "12px", borderRadius: "6px", border: "1px solid #1a2332" }}>
+              <p style={{ fontSize: "12px", fontWeight: 600, color: "#7dd3fc", marginBottom: "8px" }}>💪 Elbow Angles</p>
+              <div style={{ fontSize: "13px", color: "#e5faff", marginBottom: "4px" }}>
+                Left: <span style={{ fontWeight: 700, color: "#0ad4ff" }}>{biomechanics.leftElbowAngle !== null ? Math.round(biomechanics.leftElbowAngle) + "°" : "—"}</span>
+              </div>
+              <div style={{ fontSize: "13px", color: "#e5faff" }}>
+                Right: <span style={{ fontWeight: 700, color: "#0ad4ff" }}>{biomechanics.rightElbowAngle !== null ? Math.round(biomechanics.rightElbowAngle) + "°" : "—"}</span>
+              </div>
+            </div>
+
+            {/* Shoulder Angles */}
+            <div style={{ backgroundColor: "#0b0c10", padding: "12px", borderRadius: "6px", border: "1px solid #1a2332" }}>
+              <p style={{ fontSize: "12px", fontWeight: 600, color: "#7dd3fc", marginBottom: "8px" }}>💎 Shoulder Angles</p>
+              <div style={{ fontSize: "13px", color: "#e5faff", marginBottom: "4px" }}>
+                Left: <span style={{ fontWeight: 700, color: "#0ad4ff" }}>{biomechanics.leftShoulderAngle !== null ? Math.round(biomechanics.leftShoulderAngle) + "°" : "—"}</span>
+              </div>
+              <div style={{ fontSize: "13px", color: "#e5faff" }}>
+                Right: <span style={{ fontWeight: 700, color: "#0ad4ff" }}>{biomechanics.rightShoulderAngle !== null ? Math.round(biomechanics.rightShoulderAngle) + "°" : "—"}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
