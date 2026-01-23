@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { initializePose, detectPose, closePose, PoseLandmarks } from "../ai/poseEstimator";
 import { drawSkeleton } from "../utils/drawSkeleton";
 import { calculateBiomechanics, AngleSmoother, BiomechanicsFrame } from "../Biomechanics/angleCalculator";
+import { RuleEngine, RuleViolation } from "../rules/ruleEngine";
+import { FITNESS_RULES } from "../rules/fitnessRules";
+import { CRICKET_BOWLING_RULES } from "../rules/cricketRules";
+import FeedbackPanel from "./FeedbackPanel";
 
 interface CameraStatus {
   state: "idle" | "requesting" | "active" | "blocked" | "unsupported" | "stopped";
@@ -24,6 +28,17 @@ export default function LiveCoaching() {
   const [error, setError] = useState<string | null>(null);
   const [canvasEnabled, setCanvasEnabled] = useState<boolean>(false);
   const [biomechanics, setBiomechanics] = useState<BiomechanicsFrame | null>(null);
+  const [activity, setActivity] = useState<'fitness' | 'cricket'>('fitness');
+  const [violations, setViolations] = useState<RuleViolation[]>([]);
+  const ruleEngineRef = useRef<RuleEngine>(new RuleEngine());
+
+  // Load rules based on selected activity
+  useEffect(() => {
+    const rules = activity === 'fitness' ? FITNESS_RULES : CRICKET_BOWLING_RULES;
+    ruleEngineRef.current.clearRules();
+    ruleEngineRef.current.addRules(rules);
+    console.log(`✅ Loaded ${rules.length} ${activity} rules`);
+  }, [activity]);
 
   useEffect(() => {
     canvasEnabledRef.current = canvasEnabled;
@@ -146,6 +161,10 @@ export default function LiveCoaching() {
                 const rawFrame = calculateBiomechanics(results, 0.3);
                 const smoothedFrame = angleSmootherRef.current.smoothFrame(rawFrame);
                 setBiomechanics(smoothedFrame);
+
+                // Evaluate rules and get violations
+                const currentViolations = ruleEngineRef.current.evaluate(smoothedFrame);
+                setViolations(currentViolations);
                 
                 if (!canvasEnabledRef.current) {
                   if (detectionCount % 30 === 0) {
@@ -215,6 +234,10 @@ export default function LiveCoaching() {
     // Reset biomechanics
     angleSmootherRef.current.reset();
     setBiomechanics(null);
+
+    // Reset rule engine
+    ruleEngineRef.current.reset();
+    setViolations([]);
 
     // Cancel animation frame
     if (animationFrameRef.current) {
@@ -306,10 +329,45 @@ export default function LiveCoaching() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#0b0c10", color: "#e5faff", padding: "16px", fontFamily: "Inter, system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "12px" }}>Live Coaching – Minimal Debug View</h1>
+      <h1 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "4px" }}>Live Coaching – Phase 4 (Rule Engine)</h1>
       <p style={{ fontSize: "14px", marginBottom: "12px", color: "#b9d7ff" }}>
-        Minimal 640x480 sandbox (no Tailwind/conditional UI). Check console logs for step-by-step lifecycle.
+        Real-time biomechanics + rule-based error detection with coaching feedback
       </p>
+
+      {/* Activity Selector */}
+      <div style={{ marginBottom: "16px", display: "flex", gap: "8px", alignItems: "center" }}>
+        <span style={{ fontSize: "13px", fontWeight: 600, color: "#7dd3fc" }}>Activity:</span>
+        <button 
+          onClick={() => setActivity('fitness')}
+          style={{ 
+            padding: "6px 12px", 
+            background: activity === 'fitness' ? "#0ad4ff" : "#1e3a4c", 
+            color: activity === 'fitness' ? "#001018" : "#7dd3fc",
+            border: "none", 
+            borderRadius: "6px", 
+            fontWeight: 700, 
+            cursor: "pointer",
+            fontSize: "12px",
+          }}
+        >
+          Fitness (Squat)
+        </button>
+        <button 
+          onClick={() => setActivity('cricket')}
+          style={{ 
+            padding: "6px 12px", 
+            background: activity === 'cricket' ? "#0ad4ff" : "#1e3a4c", 
+            color: activity === 'cricket' ? "#001018" : "#7dd3fc",
+            border: "none", 
+            borderRadius: "6px", 
+            fontWeight: 700, 
+            cursor: "pointer",
+            fontSize: "12px",
+          }}
+        >
+          Cricket (Bowling)
+        </button>
+      </div>
 
       <div
         style={{
@@ -385,6 +443,14 @@ export default function LiveCoaching() {
         <div style={{ marginTop: "8px", color: "#9fb6d1" }}>
           Inspect DevTools console for lifecycle steps: getUserMedia → tracks → srcObject → onloadedmetadata → video.play → pose init.
         </div>
+      </div>
+
+      {/* Feedback Panel - Shows active coaching cues */}
+      <div style={{ maxWidth: "640px", margin: "20px auto 20px auto" }}>
+        <FeedbackPanel 
+          violations={violations} 
+          onClear={() => setViolations([])}
+        />
       </div>
 
       {/* Biomechanics Metrics Panel */}
