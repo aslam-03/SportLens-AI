@@ -6,6 +6,9 @@ import { RuleEngine, RuleViolation } from "../rules/ruleEngine";
 import { FITNESS_RULES } from "../rules/fitnessRules";
 import { CRICKET_BOWLING_RULES } from "../rules/cricketRules";
 import FeedbackPanel from "./FeedbackPanel";
+import { SessionAggregator } from "../utils/sessionAggregator";
+import { SessionStorage } from "../services/sessionStorage";
+import { postSession, checkBackendHealth } from "../services/api";
 
 interface CameraStatus {
   state: "idle" | "requesting" | "active" | "blocked" | "unsupported" | "stopped";
@@ -31,6 +34,11 @@ export default function LiveCoaching() {
   const [activity, setActivity] = useState<'fitness' | 'cricket'>('fitness');
   const [violations, setViolations] = useState<RuleViolation[]>([]);
   const ruleEngineRef = useRef<RuleEngine>(new RuleEngine());
+  
+  // Session management
+  const [isSessionActive, setIsSessionActive] = useState(false);
+  const [sessionDuration, setSessionDuration] = useState(0);
+  const sessionAggregatorRef = useRef<SessionAggregator>(new SessionAggregator());
 
   // Load rules based on selected activity
   useEffect(() => {
@@ -39,6 +47,20 @@ export default function LiveCoaching() {
     ruleEngineRef.current.addRules(rules);
     console.log(`✅ Loaded ${rules.length} ${activity} rules`);
   }, [activity]);
+
+  // Update session duration every second when session is active
+  useEffect(() => {
+    if (!isSessionActive) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const duration = sessionAggregatorRef.current.getCurrentDuration();
+      setSessionDuration(duration);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isSessionActive]);
 
   useEffect(() => {
     canvasEnabledRef.current = canvasEnabled;
@@ -162,9 +184,19 @@ export default function LiveCoaching() {
                 const smoothedFrame = angleSmootherRef.current.smoothFrame(rawFrame);
                 setBiomechanics(smoothedFrame);
 
+                // Add frame to session aggregator if session is active
+                if (sessionAggregatorRef.current.isActive()) {
+                  sessionAggregatorRef.current.addFrame(smoothedFrame);
+                }
+
                 // Evaluate rules and get violations
                 const currentViolations = ruleEngineRef.current.evaluate(smoothedFrame);
                 setViolations(currentViolations);
+                
+                // Add violations to session aggregator if session is active
+                if (sessionAggregatorRef.current.isActive() && currentViolations.length > 0) {
+                  sessionAggregatorRef.current.addViolations(currentViolations);
+                }
                 
                 if (!canvasEnabledRef.current) {
                   if (detectionCount % 30 === 0) {
@@ -222,6 +254,11 @@ export default function LiveCoaching() {
 
   // Stop camera cleanly
   const stopCamera = () => {
+    // Stop session if active
+    if (sessionAggregatorRef.current.isActive()) {
+      stopSession();
+    }
+
     // Stop all tracks in the stream
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => {
@@ -266,6 +303,56 @@ export default function LiveCoaching() {
       closePose();
       poseInitializedRef.current = false;
     }
+  };
+
+  // Start a training session
+  const startSession = () => {
+    if (status.state !== 'active') {
+      console.warn('[LiveCoaching] Cannot start session: Camera not active');
+      return;
+    }
+
+    sessionAggregatorRef.current.startSession(activity);
+    setIsSessionActive(true);
+    setSessionDuration(0);
+    console.log(`🟢 Session started: ${activity}`);
+  };
+
+  // Stop a training session
+  const stopSession = async () => {
+    if (!sessionAggregatorRef.current.isActive()) {
+      console.warn('[LiveCoaching] Cannot stop session: No active session');
+      return;
+    }
+
+    const completedSession = sessionAggregatorRef.current.stopSession();
+    if (completedSession) {
+      // Save to local storage first (offline-first approach)
+      SessionStorage.saveSession(completedSession);
+      console.log(`🔴 Session stopped and saved locally: ${completedSession.sessionId}`);
+      console.log(`   Duration: ${completedSession.duration.toFixed(1)}s`);
+      console.log(`   Frames: ${completedSession.metrics.biomechanics.totalFrames}`);
+      console.log(`   Violations: ${completedSession.metrics.totalViolations}`);
+      console.log(`   Score: ${completedSession.metrics.performanceScore}`);
+
+      // Try to sync to backend (non-blocking)
+      try {
+        const isBackendAvailable = await checkBackendHealth();
+        if (isBackendAvailable) {
+          await postSession(completedSession);
+          SessionStorage.markAsSynced(completedSession.sessionId);
+          console.log(`✅ Session synced to backend: ${completedSession.sessionId}`);
+        } else {
+          console.warn('⚠️ Backend unavailable, session saved locally only');
+        }
+      } catch (error) {
+        console.error('❌ Failed to sync session to backend:', error);
+        SessionStorage.markAsFailed(completedSession.sessionId);
+      }
+    }
+
+    setIsSessionActive(false);
+    setSessionDuration(0);
   };
 
   // Run pose detection loop with requestAnimationFrame
@@ -329,9 +416,9 @@ export default function LiveCoaching() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#0b0c10", color: "#e5faff", padding: "16px", fontFamily: "Inter, system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "4px" }}>Live Coaching – Phase 4 (Rule Engine)</h1>
+      <h1 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "4px" }}>Live Coaching – Phase 5 (Session Management)</h1>
       <p style={{ fontSize: "14px", marginBottom: "12px", color: "#b9d7ff" }}>
-        Real-time biomechanics + rule-based error detection with coaching feedback
+        Real-time biomechanics + rule-based feedback + session tracking & persistence
       </p>
 
       {/* Activity Selector */}
@@ -415,7 +502,7 @@ export default function LiveCoaching() {
         />
       </div>
 
-      <div style={{ display: "flex", gap: "8px", justifyContent: "center", marginBottom: "12px" }}>
+      <div style={{ display: "flex", gap: "8px", justifyContent: "center", marginBottom: "12px", flexWrap: "wrap" }}>
         <button onClick={startCamera} style={{ padding: "8px 12px", background: "#0ad4ff", color: "#001018", border: "none", borderRadius: "6px", fontWeight: 700, cursor: "pointer" }}>
           Start Camera
         </button>
@@ -425,7 +512,68 @@ export default function LiveCoaching() {
         <button onClick={() => setCanvasEnabled((prev) => !prev)} style={{ padding: "8px 12px", background: canvasEnabled ? "#1130ff" : "#444b5a", color: "#fff", border: "none", borderRadius: "6px", fontWeight: 700, cursor: "pointer" }}>
           {canvasEnabled ? "Disable Canvas Overlay" : "Enable Canvas Overlay"}
         </button>
+        
+        {/* Session Controls */}
+        {status.state === 'active' && !isSessionActive && (
+          <button 
+            onClick={startSession} 
+            style={{ 
+              padding: "8px 12px", 
+              background: "#10b981", 
+              color: "#fff", 
+              border: "none", 
+              borderRadius: "6px", 
+              fontWeight: 700, 
+              cursor: "pointer" 
+            }}
+          >
+            🟢 Start Session
+          </button>
+        )}
+        
+        {isSessionActive && (
+          <button 
+            onClick={stopSession} 
+            style={{ 
+              padding: "8px 12px", 
+              background: "#ef4444", 
+              color: "#fff", 
+              border: "none", 
+              borderRadius: "6px", 
+              fontWeight: 700, 
+              cursor: "pointer" 
+            }}
+          >
+            🔴 Stop Session
+          </button>
+        )}
       </div>
+
+      {/* Session Status Display */}
+      {isSessionActive && (
+        <div style={{ 
+          maxWidth: "640px", 
+          margin: "0 auto 16px auto", 
+          padding: "12px", 
+          background: "linear-gradient(90deg, #10b98120, #0ad4ff20)", 
+          border: "1px solid #10b981", 
+          borderRadius: "8px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }}>
+          <div>
+            <span style={{ fontSize: "14px", fontWeight: 700, color: "#10b981" }}>⏱️ SESSION ACTIVE</span>
+            <span style={{ fontSize: "13px", color: "#b9d7ff", marginLeft: "12px" }}>
+              Duration: {Math.floor(sessionDuration / 60)}m {Math.floor(sessionDuration % 60)}s
+            </span>
+          </div>
+          <div style={{ fontSize: "13px", color: "#b9d7ff" }}>
+            Frames: {sessionAggregatorRef.current.getFrameCount()} | 
+            Violations: {sessionAggregatorRef.current.getViolationCount()}
+          </div>
+        </div>
+      )}
 
       <div style={{ maxWidth: "640px", margin: "0 auto", fontSize: "13px", lineHeight: 1.5 }}>
         <div style={{ marginBottom: "8px" }}>
