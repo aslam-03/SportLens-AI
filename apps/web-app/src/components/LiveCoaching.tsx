@@ -254,9 +254,12 @@ export default function LiveCoaching() {
 
   // Stop camera cleanly
   const stopCamera = () => {
-    // Stop session if active
+    // Stop session if active (wrapped in async IIFE to handle properly)
     if (sessionAggregatorRef.current.isActive()) {
-      stopSession();
+      // Don't await - let it run in background
+      stopSession().catch(err => {
+        console.error('Error stopping session:', err);
+      });
     }
 
     // Stop all tracks in the stream
@@ -325,6 +328,10 @@ export default function LiveCoaching() {
       return;
     }
 
+    // Update UI state immediately (before async operations)
+    setIsSessionActive(false);
+    setSessionDuration(0);
+
     const completedSession = sessionAggregatorRef.current.stopSession();
     if (completedSession) {
       // Save to local storage first (offline-first approach)
@@ -335,7 +342,7 @@ export default function LiveCoaching() {
       console.log(`   Violations: ${completedSession.metrics.totalViolations}`);
       console.log(`   Score: ${completedSession.metrics.performanceScore}`);
 
-      // Try to sync to backend (non-blocking)
+      // Try to sync to backend (non-blocking, happens in background)
       try {
         const isBackendAvailable = await checkBackendHealth();
         if (isBackendAvailable) {
@@ -350,9 +357,6 @@ export default function LiveCoaching() {
         SessionStorage.markAsFailed(completedSession.sessionId);
       }
     }
-
-    setIsSessionActive(false);
-    setSessionDuration(0);
   };
 
   // Run pose detection loop with requestAnimationFrame
