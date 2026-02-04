@@ -32,7 +32,37 @@ __pycache__/
 .envrc
 .venv/
 *.egg-info/
+venv/
+env/
+ENV/
+.Python
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+sportlens.db
 
 # Misc
 coverage/
 .pytest_cache/
+.cache/
+*.log
+*.pid
+
+# OS
+Thumbs.db
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Lock files (optional - uncomment if needed)
+# package-lock.json
+# yarn.lock
+# poetry.lock
+
+# Environment Variables
+.env.local
+.env.test.local
+.env.production.local

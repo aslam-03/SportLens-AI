@@ -7,8 +7,7 @@ import { FITNESS_RULES } from "../rules/fitnessRules";
 import { CRICKET_BOWLING_RULES } from "../rules/cricketRules";
 import FeedbackPanel from "./FeedbackPanel";
 import { SessionAggregator } from "../utils/sessionAggregator";
-import { SessionStorage } from "../services/sessionStorage";
-import { postSession, checkBackendHealth } from "../services/api";
+import { sendSession } from "../services/sessionApi";
 
 interface CameraStatus {
   state: "idle" | "requesting" | "active" | "blocked" | "unsupported" | "stopped";
@@ -334,27 +333,28 @@ export default function LiveCoaching() {
 
     const completedSession = sessionAggregatorRef.current.stopSession();
     if (completedSession) {
-      // Save to local storage first (offline-first approach)
-      SessionStorage.saveSession(completedSession);
-      console.log(`🔴 Session stopped and saved locally: ${completedSession.sessionId}`);
+      console.log(`🔴 Session stopped: ${completedSession.sessionId}`);
       console.log(`   Duration: ${completedSession.duration.toFixed(1)}s`);
       console.log(`   Frames: ${completedSession.metrics.biomechanics.totalFrames}`);
       console.log(`   Violations: ${completedSession.metrics.totalViolations}`);
       console.log(`   Score: ${completedSession.metrics.performanceScore}`);
 
-      // Try to sync to backend (non-blocking, happens in background)
+      // Send to backend with automatic fallback to localStorage
       try {
-        const isBackendAvailable = await checkBackendHealth();
-        if (isBackendAvailable) {
-          await postSession(completedSession);
-          SessionStorage.markAsSynced(completedSession.sessionId);
-          console.log(`✅ Session synced to backend: ${completedSession.sessionId}`);
+        const result = await sendSession(completedSession);
+        
+        if (result.success) {
+          console.log(`✅ ${result.message}`);
+          if (result.synced) {
+            console.log(`   ✅ Synced to backend`);
+          } else {
+            console.warn(`   ⚠️ Saved locally (pending backend sync)`);
+          }
         } else {
-          console.warn('⚠️ Backend unavailable, session saved locally only');
+          console.error(`❌ ${result.error || result.message}`);
         }
       } catch (error) {
-        console.error('❌ Failed to sync session to backend:', error);
-        SessionStorage.markAsFailed(completedSession.sessionId);
+        console.error('❌ Error sending session:', error);
       }
     }
   };

@@ -19,10 +19,9 @@ import type {
   ActivityType,
   BiomechanicsMetrics,
   ViolationCounts,
-  SessionMetrics,
-  generateSessionId,
-  calculatePerformanceScore
+  SessionMetrics
 } from '../types/session';
+import { calculatePerformanceScore } from '../types/session';
 
 /**
  * Statistics tracker for a single angle metric
