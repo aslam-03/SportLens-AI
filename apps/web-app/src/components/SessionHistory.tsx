@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import { SessionStorage } from '../services/sessionStorage';
-import { getSessions, checkBackendHealth } from '../services/api';
+import { fetchSessions, syncPendingSessions, deleteSession } from '../services/sessionApi';
 import type { Session } from '../types/session';
 import { formatDuration, formatTimestamp } from '../types/session';
 
@@ -29,33 +29,44 @@ export default function SessionHistory() {
   }, []);
 
   const loadSessions = async () => {
-    // Try backend first
     setLoadingFromBackend(true);
-    const isBackendUp = await checkBackendHealth();
-    setBackendAvailable(isBackendUp);
-
-    if (isBackendUp) {
-      try {
-        const backendSessions = await getSessions();
-        setSessions(backendSessions);
-        setDataSource('backend');
-        console.log(`📚 Loaded ${backendSessions.length} sessions from backend`);
-      } catch (error) {
-        console.error('Failed to load from backend, falling back to local storage:', error);
-        loadLocalSessions();
+    try {
+      // Use sessionApi which handles fallback automatically
+      const result = await fetchSessions(filter === 'all' ? undefined : (filter as 'fitness' | 'cricket'));
+      
+      setSessions(result.sessions);
+      setBackendAvailable(result.source === 'backend');
+      setDataSource(result.source);
+      
+      console.log(`📚 ${result.message} (source: ${result.source})`);
+      
+      // If we have pending sessions and backend is available, try to sync them
+      if (result.source === 'backend') {
+        const allSessions = SessionStorage.getAllSessions();
+        const pendingSessions = allSessions.filter(s => s.syncStatus === 'pending');
+        
+        if (pendingSessions.length > 0) {
+          console.log(`🔄 Attempting to sync ${pendingSessions.length} pending sessions...`);
+          const syncResult = await syncPendingSessions();
+          
+          if (syncResult.succeeded > 0) {
+            console.log(`✅ Synced ${syncResult.succeeded} pending sessions`);
+            // Reload to show updated sync status
+            loadSessions();
+            return;
+          }
+        }
       }
-    } else {
-      loadLocalSessions();
+    } catch (error) {
+      console.error('Failed to load sessions:', error);
+      // Fallback already handled by fetchSessions
+      const allSessions = SessionStorage.getAllSessions();
+      setSessions(allSessions);
+      setDataSource('local');
+      setBackendAvailable(false);
+    } finally {
+      setLoadingFromBackend(false);
     }
-
-    setLoadingFromBackend(false);
-  };
-
-  const loadLocalSessions = () => {
-    const localSessions = SessionStorage.getAllSessions();
-    setSessions(localSessions);
-    setDataSource('local');
-    console.log(`📚 Loaded ${localSessions.length} sessions from local storage`);
   };
 
   // Filter sessions
@@ -70,10 +81,19 @@ export default function SessionHistory() {
   };
 
   // Delete session
-  const handleDelete = (sessionId: string) => {
+  const handleDelete = async (sessionId: string) => {
     if (confirm('Delete this session?')) {
-      SessionStorage.deleteSession(sessionId);
-      loadSessions();
+      try {
+        const success = await deleteSession(sessionId);
+        if (success) {
+          console.log(`✅ Session deleted: ${sessionId}`);
+        }
+        // Reload either way
+        loadSessions();
+      } catch (error) {
+        console.error('Failed to delete session:', error);
+        loadSessions();
+      }
     }
   };
 
