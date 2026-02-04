@@ -11,6 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from datetime import datetime
+import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from schemas import SessionCreateSchema, SessionResponseSchema, SessionListSchema
 from models import SessionModel
 from database import get_db

@@ -13,14 +13,16 @@ Features:
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import os
 import logging
 
-# Import our modules
-from database import init_db, engine
-from models import Base
-from routes.sessions import router as sessions_router
-from schemas import HealthCheckSchema
+# ============================================================================
+# Logging Setup (must be before imports that use logger)
+# ============================================================================
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Configuration
@@ -31,9 +33,18 @@ ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 API_PORT = int(os.getenv("API_PORT", 8000))
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 
-# Logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Import our modules
+from database import init_db, engine
+from models import Base
+from schemas import HealthCheckSchema
+
+# Import routes with error handling
+try:
+    from routes.sessions import router as sessions_router
+    logger.info("✅ Sessions router imported successfully")
+except ImportError as e:
+    logger.error(f"❌ Failed to import sessions router: {e}")
+    raise
 
 # ============================================================================
 # FastAPI Application
@@ -148,10 +159,13 @@ async def root():
 async def http_exception_handler(request, exc):
     """Custom HTTP exception handler."""
     logger.error(f"HTTP Exception: {exc.detail}")
-    return {
-        "error": exc.detail,
-        "status_code": exc.status_code
-    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.detail,
+            "status_code": exc.status_code
+        }
+    )
 
 
 # ============================================================================
@@ -167,6 +181,6 @@ if __name__ == "__main__":
         "main:app",
         host=API_HOST,
         port=API_PORT,
-        reload=True,
+        reload=False,  # Disabled for testing
         log_level="info"
     )
