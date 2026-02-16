@@ -60,3 +60,7 @@ sportlens-ai/
 - Frontend overlays are placeholders for future MediaPipe / MoveNet integration.
 - Backend `sessions` routes are mocked until persistence is added.
 - Everything uses open-source, zero-cost tooling for local dev.
+
+## Firebase + GCP Setup
+- Production-oriented setup guide: `docs/firebase-gcp-setup.md`
+- Functions env template: `functions/.env.example`
