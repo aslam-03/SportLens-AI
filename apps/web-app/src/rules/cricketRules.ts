@@ -1,4 +1,4 @@
-import { CoachingRule, createRule, createRangeRule } from './ruleEngine';
+import { CoachingRule, createRule } from './ruleEngine';
 
 /**
  * Cricket bowling coaching rules
@@ -61,12 +61,11 @@ export const SHOULDER_ALIGNMENT_RULES: CoachingRule[] = [
   ),
 
   // Excessive shoulder pull (over-rotation)
-  createRangeRule(
+  createRule(
     'SHOULDER_OVER_ROTATE',
     'leftShoulderAngle',
     'greaterThan',
     160,
-    999, // Not used for greaterThan
     'Control your shoulder rotation',
     'info',
     4000

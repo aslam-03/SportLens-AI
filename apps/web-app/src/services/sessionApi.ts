@@ -155,7 +155,7 @@ export async function syncPendingSessions(): Promise<{
   // Update local storage with new sync status
   if (result.succeeded > 0) {
     for (const session of pendingSessions) {
-      const updated = SessionStorage.getSession(session.sessionId);
+      const updated = SessionStorage.getSessionById(session.sessionId);
       if (updated) {
         updated.syncStatus = 'synced';
         updated.syncedAt = Date.now();

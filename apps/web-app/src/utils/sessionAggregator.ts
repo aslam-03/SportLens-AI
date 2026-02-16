@@ -128,28 +128,28 @@ export class SessionAggregator {
     this.totalFrames++;
 
     // Update angle statistics
-    if (frame.leftKneeAngle !== undefined) {
+    if (frame.leftKneeAngle !== undefined && frame.leftKneeAngle !== null) {
       this.leftKneeStats.add(frame.leftKneeAngle);
     }
-    if (frame.rightKneeAngle !== undefined) {
+    if (frame.rightKneeAngle !== undefined && frame.rightKneeAngle !== null) {
       this.rightKneeStats.add(frame.rightKneeAngle);
     }
-    if (frame.leftHipAngle !== undefined) {
+    if (frame.leftHipAngle !== undefined && frame.leftHipAngle !== null) {
       this.leftHipStats.add(frame.leftHipAngle);
     }
-    if (frame.rightHipAngle !== undefined) {
+    if (frame.rightHipAngle !== undefined && frame.rightHipAngle !== null) {
       this.rightHipStats.add(frame.rightHipAngle);
     }
-    if (frame.leftElbowAngle !== undefined) {
+    if (frame.leftElbowAngle !== undefined && frame.leftElbowAngle !== null) {
       this.leftElbowStats.add(frame.leftElbowAngle);
     }
-    if (frame.rightElbowAngle !== undefined) {
+    if (frame.rightElbowAngle !== undefined && frame.rightElbowAngle !== null) {
       this.rightElbowStats.add(frame.rightElbowAngle);
     }
-    if (frame.leftShoulderAngle !== undefined) {
+    if (frame.leftShoulderAngle !== undefined && frame.leftShoulderAngle !== null) {
       this.leftShoulderStats.add(frame.leftShoulderAngle);
     }
-    if (frame.rightShoulderAngle !== undefined) {
+    if (frame.rightShoulderAngle !== undefined && frame.rightShoulderAngle !== null) {
       this.rightShoulderStats.add(frame.rightShoulderAngle);
     }
   }
