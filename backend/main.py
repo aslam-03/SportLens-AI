@@ -1,13 +1,12 @@
 """  
-SportLens AI Backend - Phase 5
+SportLens AI Backend
 
-FastAPI backend for session management with SQLite persistence.
+FastAPI backend for SportLens AI with Firebase integration.
 
 Features:
-- POST /sessions: Store completed training sessions
-- GET /sessions: Retrieve all sessions
-- GET /sessions/{session_id}: Get specific session
-- SQLite database for persistence
+- Video upload to Cloudflare R2
+- Firebase Authentication
+- Session data stored in Firestore (client-side)
 - CORS enabled for frontend communication
 """
 
@@ -34,19 +33,10 @@ API_PORT = int(os.getenv("API_PORT", 8000))
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 
 # Import our modules
-from database import init_db, engine
-from models import Base
 from schemas import HealthCheckSchema
 from auth import initialize_firebase
 
 # Import routes with error handling
-try:
-    from routes.sessions import router as sessions_router
-    logger.info("✅ Sessions router imported successfully")
-except ImportError as e:
-    logger.error(f"❌ Failed to import sessions router: {e}")
-    raise
-
 try:
     from routes.upload import router as upload_router
     logger.info("✅ Upload router imported successfully")
@@ -88,13 +78,9 @@ logger.info(f"✅ CORS enabled for origins: {ALLOWED_ORIGINS}")
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database and Firebase on startup."""
+    """Initialize Firebase on startup."""
     try:
         logger.info("🚀 Starting SportLens AI Backend...")
-        
-        # Initialize database
-        init_db()
-        logger.info("✅ Database initialized successfully")
         
         # Initialize Firebase Admin SDK
         initialize_firebase()
@@ -123,35 +109,33 @@ async def shutdown_event():
 )
 async def health_check():
     """
-    Check if backend is running and database is accessible.
+    Check if backend is running and Firebase is initialized.
     """
     try:
-        # Try to get a connection from the engine
-        with engine.connect() as connection:
-            pass
+        import firebase_admin
+        
+        # Check if Firebase is initialized
+        firebase_status = "connected" if firebase_admin._apps else "not initialized"
         
         return HealthCheckSchema(
             status="ok",
-            database="connected",
+            database=firebase_status,
             message="Backend is operational"
         )
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection failed"
+            detail="Backend health check failed"
         )
 
-
-# Include upload router
-app.include_router(upload_router)
 
 # ============================================================================
 # Routes
 # ============================================================================
 
-# Include sessions router
-app.include_router(sessions_router)
+# Include upload router
+app.include_router(upload_router)
 
 # ============================================================================
 # Root Endpoint
