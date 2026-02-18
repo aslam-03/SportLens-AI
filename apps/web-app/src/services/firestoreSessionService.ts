@@ -40,7 +40,7 @@ import {
   type Timestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import type { Session } from '../types/session';
+import type { Session, R2Objects } from '../types/session';
 
 /**
  * Firestore session document structure
@@ -57,7 +57,7 @@ export interface FirestoreSession {
   status: 'processing' | 'completed';
   reportId?: string; // Link to reports/{reportId}
   createdAt: Timestamp | ReturnType<typeof serverTimestamp>;
-  r2Objects: Record<string, string>;
+  r2Objects?: R2Objects; // Optional R2 cloud storage URLs
   feedback: string; // Deprecated - use reports collection
   notes?: string;
 }
@@ -93,7 +93,6 @@ export async function saveSessionToFirestore(
     metrics: session.metrics,
     status: 'processing',
     createdAt: serverTimestamp(),
-    r2Objects: {},
     feedback: '',
     ...(session.notes && { notes: session.notes }),
   };
@@ -147,6 +146,7 @@ export async function getSessionFromFirestore(
     status: data.status,
     reportId: data.reportId,
     ...(data.notes && { notes: data.notes }),
+    ...(data.r2Objects && { r2Objects: data.r2Objects }),
     syncStatus: 'synced',
   };
 
@@ -206,6 +206,7 @@ export async function getSessionsFromFirestore(
       status: data.status,
       reportId: data.reportId,
       ...(data.notes && { notes: data.notes }),
+      ...(data.r2Objects && { r2Objects: data.r2Objects }),
       syncStatus: 'synced',
     });
   });

@@ -15,6 +15,7 @@ import { fetchSessions, syncPendingSessions, deleteSession } from '../services/s
 import type { Session } from '../types/session';
 import { formatDuration, formatTimestamp } from '../types/session';
 import { useAuth } from '../hooks/useAuth';
+import SessionReport from './SessionReport';
 
 export default function SessionHistory() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -23,6 +24,7 @@ export default function SessionHistory() {
   const [loadingFromFirestore, setLoadingFromFirestore] = useState(false);
   const [firestoreAvailable, setFirestoreAvailable] = useState(false);
   const [dataSource, setDataSource] = useState<'local' | 'firestore'>('local');
+  const [viewingReport, setViewingReport] = useState<Session | null>(null);
   
   // Get authenticated user
   const { user } = useAuth();
@@ -470,6 +472,24 @@ export default function SessionHistory() {
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
+                          setViewingReport(session);
+                        }}
+                        style={{ 
+                          padding: "6px 12px", 
+                          background: "#0ad4ff", 
+                          color: "#001018",
+                          border: "none", 
+                          borderRadius: "6px", 
+                          fontWeight: 700, 
+                          cursor: "pointer",
+                          fontSize: "11px",
+                        }}
+                      >
+                        📊 View Report
+                      </button>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
                           handleDelete(session.sessionId);
                         }}
                         style={{ 
@@ -507,6 +527,57 @@ export default function SessionHistory() {
           {" "}{sessions.length} total sessions ({SessionStorage.getStats().fitnessSessions} fitness, {SessionStorage.getStats().cricketSessions} cricket)
         </div>
       </div>
+
+      {/* Session Report Modal */}
+      {viewingReport && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: "rgba(0, 0, 0, 0.8)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 1000,
+          padding: "20px",
+          overflowY: "auto"
+        }}>
+          <div style={{
+            background: "#0f1419",
+            borderRadius: "12px",
+            maxWidth: "900px",
+            width: "100%",
+            maxHeight: "90vh",
+            overflowY: "auto",
+            position: "relative"
+          }}>
+            <button
+              onClick={() => setViewingReport(null)}
+              style={{
+                position: "sticky",
+                top: "10px",
+                right: "10px",
+                float: "right",
+                margin: "10px",
+                padding: "8px 16px",
+                background: "#ef4444",
+                color: "#fff",
+                border: "none",
+                borderRadius: "6px",
+                fontWeight: 700,
+                cursor: "pointer",
+                fontSize: "12px",
+                zIndex: 10
+              }}
+            >
+              ✕ Close
+            </button>
+            <SessionReport session={viewingReport} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

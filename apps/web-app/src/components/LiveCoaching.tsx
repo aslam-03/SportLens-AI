@@ -517,10 +517,13 @@ export default function LiveCoaching() {
 
             // Step 3: Update Firestore session doc with R2 URLs
             setUploadProgress('Updating session with R2 URLs...');
-            await updateSessionR2Objects(uid, completedSession.sessionId, {
+            const r2Objects: Record<string, string> = {
               sessionDataUrl,
-              videoUrl,
-            });
+            };
+            if (videoUrl) {
+              r2Objects.videoUrl = videoUrl;
+            }
+            await updateSessionR2Objects(uid, completedSession.sessionId, r2Objects);
 
             console.log(`✅ Session document updated with R2 URLs`);
             setUploadProgress('Upload complete!');

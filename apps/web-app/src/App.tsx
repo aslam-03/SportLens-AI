@@ -2,7 +2,6 @@ import { useState } from "react";
 import Dashboard from "./components/Dashboard";
 import LiveCoaching from "./components/LiveCoaching";
 import SessionHistory from "./components/SessionHistory";
-import ReportsDashboard from "./components/ReportsDashboard";
 import AuthPanel from "./components/auth/AuthPanel";
 import { useAuth } from "./hooks/useAuth";
 
@@ -10,7 +9,6 @@ const tabs = [
   { id: "dashboard", label: "Home" },
   { id: "live", label: "Live Coaching" },
   { id: "history", label: "Session History" },
-  { id: "reports", label: "Reports" },
 ];
 
 function App() {
@@ -104,7 +102,6 @@ function App() {
         {activeTab === "dashboard" && <Dashboard />}
         {activeTab === "live" && <LiveCoaching />}
         {activeTab === "history" && <SessionHistory />}
-        {activeTab === "reports" && <ReportsDashboard />}
       </main>
     </div>
   );
