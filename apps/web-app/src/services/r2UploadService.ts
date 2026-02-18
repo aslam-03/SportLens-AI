@@ -1,0 +1,215 @@
+/**
+ * Cloudflare R2 Upload Service
+ * 
+ * Handles secure file uploads to R2 using presigned URLs.
+ * Never exposes R2 credentials to the frontend.
+ * 
+ * Flow:
+ * 1. Request presigned URL from backend
+ * 2. Upload file directly to R2 using signed URL
+ * 3. Return public URL to store in Firestore
+ */
+
+import { auth } from '../firebase';
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+
+/**
+ * Error class for R2 upload failures
+ */
+export class R2UploadError extends Error {
+  constructor(message: string, public code?: string) {
+    super(message);
+    this.name = 'R2UploadError';
+  }
+}
+
+/**
+ * Request presigned upload URL from backend
+ */
+async function requestPresignedUrl(
+  sessionId: string,
+  fileName: string,
+  contentType: string
+): Promise<{
+  uploadUrl: string;
+  publicUrl: string;
+  objectKey: string;
+}> {
+  const user = auth.currentUser;
+  
+  if (!user) {
+    throw new R2UploadError('User must be authenticated to upload files', 'AUTH_REQUIRED');
+  }
+
+  // Get Firebase ID token
+  const idToken = await user.getIdToken();
+
+  const response = await fetch(`${BACKEND_URL}/upload/generateUploadUrl`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({
+      sessionId,
+      fileName,
+      contentType,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new R2UploadError(
+      error.detail || `Failed to generate upload URL: ${response.statusText}`,
+      'PRESIGNED_URL_FAILED'
+    );
+  }
+
+  return response.json();
+}
+
+/**
+ * Upload file to R2 using presigned URL
+ */
+async function uploadToR2(
+  uploadUrl: string,
+  file: Blob,
+  contentType: string
+): Promise<void> {
+  const response = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': contentType,
+    },
+    body: file,
+  });
+
+  if (!response.ok) {
+    throw new R2UploadError(
+      `Failed to upload to R2: ${response.statusText}`,
+      'UPLOAD_FAILED'
+    );
+  }
+}
+
+/**
+ * Upload keypoints JSON data to R2
+ * 
+ * @param sessionId - Session ID for organizing files
+ * @param keypointsData - Array of keypoint frames
+ * @returns Public URL of uploaded file
+ */
+export async function uploadKeypointsToR2(
+  sessionId: string,
+  keypointsData: any[]
+): Promise<string> {
+  console.log(`[R2Upload] Uploading keypoints for session: ${sessionId}`);
+
+  try {
+    // Convert keypoints to JSON blob
+    const jsonString = JSON.stringify(keypointsData, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+
+    console.log(`[R2Upload] Keypoints JSON size: ${(blob.size / 1024).toFixed(2)} KB`);
+
+    // Step 1: Request presigned upload URL
+    const { uploadUrl, publicUrl, objectKey } = await requestPresignedUrl(
+      sessionId,
+      'keypoints.json',
+      'application/json'
+    );
+
+    console.log(`[R2Upload] Received presigned URL for: ${objectKey}`);
+
+    // Step 2: Upload to R2
+    await uploadToR2(uploadUrl, blob, 'application/json');
+
+    console.log(`[R2Upload] ✅ Upload successful: ${publicUrl}`);
+
+    return publicUrl;
+  } catch (error) {
+    if (error instanceof R2UploadError) {
+      console.error(`[R2Upload] ❌ ${error.message}`);
+      throw error;
+    }
+    
+    console.error('[R2Upload] ❌ Unexpected error:', error);
+    throw new R2UploadError(
+      error instanceof Error ? error.message : 'Unknown upload error',
+      'UNKNOWN_ERROR'
+    );
+  }
+}
+
+/**
+ * Upload video blob to R2
+ * 
+ * @param sessionId - Session ID for organizing files
+ * @param videoBlob - Recorded video blob
+ * @param fileName - Video file name (e.g., 'session.webm')
+ * @returns Public URL of uploaded file
+ */
+export async function uploadVideoToR2(
+  sessionId: string,
+  videoBlob: Blob,
+  fileName: string = 'session.webm'
+): Promise<string> {
+  console.log(`[R2Upload] Uploading video for session: ${sessionId}`);
+
+  try {
+    const contentType = videoBlob.type || 'video/webm';
+    
+    console.log(`[R2Upload] Video size: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
+
+    // Step 1: Request presigned upload URL
+    const { uploadUrl, publicUrl, objectKey } = await requestPresignedUrl(
+      sessionId,
+      fileName,
+      contentType
+    );
+
+    console.log(`[R2Upload] Received presigned URL for: ${objectKey}`);
+
+    // Step 2: Upload to R2
+    await uploadToR2(uploadUrl, videoBlob, contentType);
+
+    console.log(`[R2Upload] ✅ Upload successful: ${publicUrl}`);
+
+    return publicUrl;
+  } catch (error) {
+    if (error instanceof R2UploadError) {
+      console.error(`[R2Upload] ❌ ${error.message}`);
+      throw error;
+    }
+    
+    console.error('[R2Upload] ❌ Unexpected error:', error);
+    throw new R2UploadError(
+      error instanceof Error ? error.message : 'Unknown upload error',
+      'UNKNOWN_ERROR'
+    );
+  }
+}
+
+/**
+ * Check if R2 upload is available (user authenticated, backend reachable)
+ */
+export async function isR2UploadAvailable(): Promise<boolean> {
+  try {
+    // Check if user is authenticated
+    const user = auth.currentUser;
+    if (!user) {
+      return false;
+    }
+
+    // Optional: Ping backend health endpoint
+    const response = await fetch(`${BACKEND_URL}/health`, {
+      method: 'GET',
+    });
+
+    return response.ok;
+  } catch (error) {
+    console.warn('[R2Upload] Backend not reachable:', error);
+    return false;
+  }
+}
