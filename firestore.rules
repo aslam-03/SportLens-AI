@@ -80,6 +80,12 @@ service cloud.firestore {
     match /users/{uid} {
       // Users can read and write their own profile
       allow read, write: if isAuthenticated() && request.auth.uid == uid;
+      
+      // DENY OLD NESTED SESSIONS PATH
+      // Block access to deprecated nested structure
+      match /sessions/{sessionId} {
+        allow read, write: if false;  // Always deny - use flat sessions/ collection instead
+      }
     }
     
     // ============================================================
