@@ -108,6 +108,17 @@ export interface SessionMetrics {
 }
 
 /**
+ * R2 Cloud Storage URLs for session assets
+ */
+export interface R2Objects {
+  // JSON file with session data/keypoints
+  sessionDataUrl?: string;
+  
+  // Video recording of the session
+  videoUrl?: string;
+}
+
+/**
  * Complete session data structure
  * 
  * This is the core data model for a training session.
@@ -119,6 +130,9 @@ export interface SessionMetrics {
 export interface Session {
   // Unique identifier (UUID v4)
   sessionId: string;
+  
+  // User who owns this session
+  userId?: string;
   
   // Timestamps (Unix milliseconds)
   startTime: number;
@@ -133,8 +147,17 @@ export interface Session {
   // Aggregated metrics
   metrics: SessionMetrics;
   
+  // Processing status
+  status?: 'processing' | 'completed';
+  
+  // Link to generated report (if any)
+  reportId?: string;
+  
   // Optional metadata
   notes?: string;
+  
+  // R2 cloud storage URLs
+  r2Objects?: R2Objects;
   
   // Sync status (for future backend integration)
   syncStatus?: 'pending' | 'synced' | 'failed';

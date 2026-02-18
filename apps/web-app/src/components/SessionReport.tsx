@@ -133,6 +133,23 @@ export default function SessionReport({ session }: SessionReportProps) {
           </p>
         </div>
 
+        {/* Video player if available */}
+        {session.r2Objects?.videoUrl && (
+          <div style={{ marginBottom: 20, border: '1px solid #d1d5db', borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ padding: 12, borderBottom: '1px solid #d1d5db', background: '#f9fafb' }}>
+              <h4 style={{ margin: 0, fontSize: 14, color: '#374151' }}>Session Recording</h4>
+            </div>
+            <video
+              controls
+              style={{ width: '100%', display: 'block', background: '#000' }}
+              preload="metadata"
+            >
+              <source src={session.r2Objects.videoUrl} type="video/webm" />
+              Your browser does not support the video tag.
+            </video>
+          </div>
+        )}
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 20 }}>
           <div style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: 12 }}>
             <p style={{ margin: 0, fontSize: 11, color: '#6b7280' }}>Duration</p>

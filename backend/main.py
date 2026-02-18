@@ -37,6 +37,7 @@ API_HOST = os.getenv("API_HOST", "0.0.0.0")
 from database import init_db, engine
 from models import Base
 from schemas import HealthCheckSchema
+from auth import initialize_firebase
 
 # Import routes with error handling
 try:
@@ -44,6 +45,13 @@ try:
     logger.info("✅ Sessions router imported successfully")
 except ImportError as e:
     logger.error(f"❌ Failed to import sessions router: {e}")
+    raise
+
+try:
+    from routes.upload import router as upload_router
+    logger.info("✅ Upload router imported successfully")
+except ImportError as e:
+    logger.error(f"❌ Failed to import upload router: {e}")
     raise
 
 # ============================================================================
@@ -80,13 +88,20 @@ logger.info(f"✅ CORS enabled for origins: {ALLOWED_ORIGINS}")
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on startup."""
+    """Initialize database and Firebase on startup."""
     try:
         logger.info("🚀 Starting SportLens AI Backend...")
+        
+        # Initialize database
         init_db()
         logger.info("✅ Database initialized successfully")
+        
+        # Initialize Firebase Admin SDK
+        initialize_firebase()
+        logger.info("✅ Firebase Admin initialized successfully")
+        
     except Exception as e:
-        logger.error(f"❌ Failed to initialize database: {e}")
+        logger.error(f"❌ Startup failed: {e}")
         raise
 
 
@@ -127,6 +142,9 @@ async def health_check():
             detail="Database connection failed"
         )
 
+
+# Include upload router
+app.include_router(upload_router)
 
 # ============================================================================
 # Routes

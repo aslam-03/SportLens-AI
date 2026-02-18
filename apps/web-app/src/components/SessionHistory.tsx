@@ -14,40 +14,49 @@ import { SessionStorage } from '../services/sessionStorage';
 import { fetchSessions, syncPendingSessions, deleteSession } from '../services/sessionApi';
 import type { Session } from '../types/session';
 import { formatDuration, formatTimestamp } from '../types/session';
+import { useAuth } from '../hooks/useAuth';
 
 export default function SessionHistory() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [filter, setFilter] = useState<'all' | 'fitness' | 'cricket'>('all');
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [loadingFromBackend, setLoadingFromBackend] = useState(false);
-  const [backendAvailable, setBackendAvailable] = useState(false);
-  const [dataSource, setDataSource] = useState<'local' | 'backend'>('local');
+  const [loadingFromFirestore, setLoadingFromFirestore] = useState(false);
+  const [firestoreAvailable, setFirestoreAvailable] = useState(false);
+  const [dataSource, setDataSource] = useState<'local' | 'firestore'>('local');
+  
+  // Get authenticated user
+  const { user } = useAuth();
 
-  // Load sessions on mount
+  // Load sessions on mount and when filter changes
   useEffect(() => {
     loadSessions();
-  }, []);
+  }, [filter, user]);
 
   const loadSessions = async () => {
-    setLoadingFromBackend(true);
+    setLoadingFromFirestore(true);
     try {
+      const uid = user?.uid || null;
+      
       // Use sessionApi which handles fallback automatically
-      const result = await fetchSessions(filter === 'all' ? undefined : (filter as 'fitness' | 'cricket'));
+      const result = await fetchSessions(
+        uid,
+        filter === 'all' ? undefined : (filter as 'fitness' | 'cricket')
+      );
       
       setSessions(result.sessions);
-      setBackendAvailable(result.source === 'backend');
+      setFirestoreAvailable(result.source === 'firestore');
       setDataSource(result.source);
       
       console.log(`📚 ${result.message} (source: ${result.source})`);
       
-      // If we have pending sessions and backend is available, try to sync them
-      if (result.source === 'backend') {
+      // If we have pending sessions and user is authenticated, try to sync them
+      if (uid && result.source === 'firestore') {
         const allSessions = SessionStorage.getAllSessions();
         const pendingSessions = allSessions.filter(s => s.syncStatus === 'pending');
         
         if (pendingSessions.length > 0) {
           console.log(`🔄 Attempting to sync ${pendingSessions.length} pending sessions...`);
-          const syncResult = await syncPendingSessions();
+          const syncResult = await syncPendingSessions(uid);
           
           if (syncResult.succeeded > 0) {
             console.log(`✅ Synced ${syncResult.succeeded} pending sessions`);
@@ -63,9 +72,9 @@ export default function SessionHistory() {
       const allSessions = SessionStorage.getAllSessions();
       setSessions(allSessions);
       setDataSource('local');
-      setBackendAvailable(false);
+      setFirestoreAvailable(false);
     } finally {
-      setLoadingFromBackend(false);
+      setLoadingFromFirestore(false);
     }
   };
 
@@ -84,7 +93,8 @@ export default function SessionHistory() {
   const handleDelete = async (sessionId: string) => {
     if (confirm('Delete this session?')) {
       try {
-        const success = await deleteSession(sessionId);
+        const uid = user?.uid || null;
+        const success = await deleteSession(sessionId, uid);
         if (success) {
           console.log(`✅ Session deleted: ${sessionId}`);
         }
@@ -142,15 +152,15 @@ export default function SessionHistory() {
           fontSize: "12px"
         }}>
           <span style={{ fontSize: "16px" }}>
-            {dataSource === 'backend' ? '☁️' : '💾'}
+            {dataSource === 'firestore' ? '☁️' : '💾'}
           </span>
-          <span style={{ color: dataSource === 'backend' ? '#10b981' : '#f59e0b', fontWeight: 600 }}>
-            {loadingFromBackend ? 'Checking backend...' : 
-             dataSource === 'backend' ? 'Connected to backend' : 'Offline mode (local storage)'}
+          <span style={{ color: dataSource === 'firestore' ? '#10b981' : '#f59e0b', fontWeight: 600 }}>
+            {loadingFromFirestore ? 'Checking Firestore...' : 
+             dataSource === 'firestore' ? 'Connected to Firestore' : 'Offline mode (local storage)'}
           </span>
-          {!backendAvailable && !loadingFromBackend && (
+          {!firestoreAvailable && !loadingFromFirestore && (
             <span style={{ color: "#6b7280", fontSize: "11px", marginLeft: "auto" }}>
-              Backend unavailable - showing local sessions only
+              {user ? 'Firestore unavailable - showing local sessions only' : 'Not authenticated - showing local sessions only'}
             </span>
           )}
         </div>

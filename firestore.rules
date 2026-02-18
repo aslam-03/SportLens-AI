@@ -1,0 +1,103 @@
+rules_version = '2';
+
+/**
+ * Firestore Security Rules for SportLens AI
+ * 
+ * Production-ready rules for flat collection structure:
+ * - sessions/{sessionId}
+ * - reports/{reportId}
+ * - users/{uid}
+ * 
+ * Key Security Principles:
+ * 1. Users can only access their own data
+ * 2. All writes must include userId matching authenticated user
+ * 3. No unauthenticated access
+ * 4. Future: Add admin role for analytics
+ */
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function: Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function: Check if user owns the resource
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // Helper function: Check if incoming data has correct userId
+    function hasValidUserId() {
+      return request.resource.data.userId == request.auth.uid;
+    }
+    
+    // ============================================================
+    // SESSIONS COLLECTION (FLAT STRUCTURE)
+    // ============================================================
+    match /sessions/{sessionId} {
+      // Allow users to read their own sessions
+      allow read: if isAuthenticated() && isOwner(resource.data.userId);
+      
+      // Allow users to create sessions (must set userId = auth.uid)
+      allow create: if isAuthenticated() && hasValidUserId();
+      
+      // Allow users to update their own sessions
+      // Note: userId cannot be changed after creation
+      allow update: if isAuthenticated() 
+                    && isOwner(resource.data.userId)
+                    && request.resource.data.userId == resource.data.userId;
+      
+      // Allow users to delete their own sessions
+      allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+    }
+    
+    // ============================================================
+    // REPORTS COLLECTION
+    // ============================================================
+    match /reports/{reportId} {
+      // Allow users to read their own reports
+      allow read: if isAuthenticated() && isOwner(resource.data.userId);
+      
+      // Allow users to create reports (must set userId = auth.uid)
+      allow create: if isAuthenticated() && hasValidUserId();
+      
+      // Allow users to update their own reports
+      // Note: userId and sessionId cannot be changed after creation
+      allow update: if isAuthenticated() 
+                    && isOwner(resource.data.userId)
+                    && request.resource.data.userId == resource.data.userId
+                    && request.resource.data.sessionId == resource.data.sessionId;
+      
+      // Allow users to delete their own reports
+      allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+    }
+    
+    // ============================================================
+    // USERS COLLECTION
+    // ============================================================
+    match /users/{uid} {
+      // Users can read and write their own profile
+      allow read, write: if isAuthenticated() && request.auth.uid == uid;
+    }
+    
+    // ============================================================
+    // FUTURE: Admin Access (Commented Out)
+    // ============================================================
+    // Uncomment when you add admin functionality
+    
+    // function isAdmin() {
+    //   return isAuthenticated() 
+    //          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    // }
+    
+    // match /sessions/{sessionId} {
+    //   allow read: if isAdmin();  // Admins can read all sessions
+    // }
+    
+    // match /reports/{reportId} {
+    //   allow read: if isAdmin();  // Admins can read all reports
+    // }
+  }
+}

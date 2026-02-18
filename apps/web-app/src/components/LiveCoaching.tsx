@@ -8,6 +8,9 @@ import { CRICKET_BOWLING_RULES } from "../rules/cricketRules";
 import FeedbackPanel from "./FeedbackPanel";
 import { SessionAggregator } from "../utils/sessionAggregator";
 import { sendSession } from "../services/sessionApi";
+import { useAuth } from "../hooks/useAuth";
+import { uploadKeypointsToR2, uploadVideoToR2 } from "../services/r2UploadService";
+import { updateSessionR2Objects } from "../services/firestoreSessionService";
 
 interface CameraStatus {
   state: "idle" | "requesting" | "active" | "blocked" | "unsupported" | "stopped";
@@ -22,6 +25,10 @@ export default function LiveCoaching() {
   const poseInitializedRef = useRef<boolean>(false);
   const canvasEnabledRef = useRef<boolean>(false);
   const angleSmootherRef = useRef<AngleSmoother>(new AngleSmoother(5));
+  
+  // Video recording refs
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
 
   const [status, setStatus] = useState<CameraStatus>({
     state: "idle",
@@ -38,6 +45,19 @@ export default function LiveCoaching() {
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [sessionDuration, setSessionDuration] = useState(0);
   const sessionAggregatorRef = useRef<SessionAggregator>(new SessionAggregator());
+  
+  // Video recording state
+  const [isRecording, setIsRecording] = useState(false);
+
+  // Session save states
+  const [isSavingSession, setIsSavingSession] = useState(false);
+  const [isUploadingToR2, setIsUploadingToR2] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [lastSavedSessionId, setLastSavedSessionId] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<string>('');
+
+  // Get authenticated user
+  const { user } = useAuth();
 
   // Load rules based on selected activity
   useEffect(() => {
@@ -307,6 +327,90 @@ export default function LiveCoaching() {
     }
   };
 
+  // Start video recording
+  const startVideoRecording = () => {
+    if (!streamRef.current) {
+      console.warn('[VideoRecording] No stream available');
+      return;
+    }
+
+    try {
+      // Reset recorded chunks
+      recordedChunksRef.current = [];
+
+      // Create MediaRecorder with WebM format
+      const options = {
+        mimeType: 'video/webm;codecs=vp9',
+        videoBitsPerSecond: 2500000, // 2.5 Mbps for good quality
+      };
+
+      // Fallback if vp9 not supported
+      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options.mimeType = 'video/webm';
+      }
+
+      const mediaRecorder = new MediaRecorder(streamRef.current, options);
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recordedChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstart = () => {
+        console.log('🎥 Video recording started');
+        setIsRecording(true);
+      };
+
+      mediaRecorder.onstop = () => {
+        console.log('🎥 Video recording stopped');
+        setIsRecording(false);
+      };
+
+      mediaRecorder.onerror = (event) => {
+        console.error('🎥 MediaRecorder error:', event);
+        setIsRecording(false);
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start(1000); // Collect data every 1 second
+    } catch (error) {
+      console.error('Failed to start video recording:', error);
+    }
+  };
+
+  // Stop video recording and return blob
+  const stopVideoRecording = (): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+      const mediaRecorder = mediaRecorderRef.current;
+      
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        console.warn('[VideoRecording] No active recording to stop');
+        resolve(null);
+        return;
+      }
+
+      mediaRecorder.onstop = () => {
+        console.log(`🎥 Video recording stopped. Chunks: ${recordedChunksRef.current.length}`);
+        
+        if (recordedChunksRef.current.length === 0) {
+          console.warn('[VideoRecording] No video data recorded');
+          resolve(null);
+          return;
+        }
+
+        // Create video blob from recorded chunks
+        const videoBlob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+        console.log(`🎥 Video blob created: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
+        
+        setIsRecording(false);
+        resolve(videoBlob);
+      };
+
+      mediaRecorder.stop();
+    });
+  };
+
   // Start a training session
   const startSession = () => {
     if (status.state !== 'active') {
@@ -318,6 +422,9 @@ export default function LiveCoaching() {
     setIsSessionActive(true);
     setSessionDuration(0);
     console.log(`🟢 Session started: ${activity}`);
+    
+    // Start video recording
+    startVideoRecording();
   };
 
   // Stop a training session
@@ -331,6 +438,9 @@ export default function LiveCoaching() {
     setIsSessionActive(false);
     setSessionDuration(0);
 
+    // Stop video recording
+    const videoBlob = await stopVideoRecording();
+
     const completedSession = sessionAggregatorRef.current.stopSession();
     if (completedSession) {
       console.log(`🔴 Session stopped: ${completedSession.sessionId}`);
@@ -338,23 +448,105 @@ export default function LiveCoaching() {
       console.log(`   Frames: ${completedSession.metrics.biomechanics.totalFrames}`);
       console.log(`   Violations: ${completedSession.metrics.totalViolations}`);
       console.log(`   Score: ${completedSession.metrics.performanceScore}`);
+      if (videoBlob) {
+        console.log(`   Video: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
+      }
 
-      // Send to backend with automatic fallback to localStorage
+      // Set saving state
+      setIsSavingSession(true);
+      setSaveError(null);
+      setLastSavedSessionId(null);
+      setUploadProgress('Saving session to Firestore...');
+
+      // Send to Firestore with authenticated user
       try {
-        const result = await sendSession(completedSession);
+        const uid = user?.uid || null;
         
-        if (result.success) {
-          console.log(`✅ ${result.message}`);
-          if (result.synced) {
-            console.log(`   ✅ Synced to backend`);
-          } else {
-            console.warn(`   ⚠️ Saved locally (pending backend sync)`);
-          }
-        } else {
+        if (!uid) {
+          console.warn('⚠️ User not authenticated - session will be saved locally only');
+        }
+
+        // Step 1: Save session to Firestore
+        const result = await sendSession(completedSession, uid);
+        
+        if (!result.success) {
           console.error(`❌ ${result.error || result.message}`);
+          setSaveError(result.error || result.message);
+          setIsSavingSession(false);
+          return;
+        }
+
+        console.log(`✅ ${result.message}`);
+        
+        // Step 2: Upload session data and video to R2 (if authenticated and synced to Firestore)
+        if (uid && result.synced) {
+          try {
+            setIsUploadingToR2(true);
+            setUploadProgress('Uploading session data to R2...');
+
+            // Create session summary JSON for R2 upload
+            const sessionData = {
+              sessionId: completedSession.sessionId,
+              activityType: completedSession.activityType,
+              startTime: completedSession.startTime,
+              endTime: completedSession.endTime,
+              duration: completedSession.duration,
+              metrics: completedSession.metrics,
+              timestamp: new Date().toISOString(),
+            };
+
+            // Upload session data JSON
+            const sessionDataUrl = await uploadKeypointsToR2(
+              completedSession.sessionId,
+              [sessionData] // Wrap in array for consistency with future keypoints array
+            );
+
+            console.log(`✅ Uploaded session data to R2: ${sessionDataUrl}`);
+
+            // Upload video if available
+            let videoUrl: string | undefined;
+            if (videoBlob) {
+              setUploadProgress('Uploading video to R2...');
+              videoUrl = await uploadVideoToR2(
+                completedSession.sessionId,
+                videoBlob,
+                'session.webm'
+              );
+              console.log(`✅ Uploaded video to R2: ${videoUrl}`);
+            }
+
+            // Step 3: Update Firestore session doc with R2 URLs
+            setUploadProgress('Updating session with R2 URLs...');
+            await updateSessionR2Objects(uid, completedSession.sessionId, {
+              sessionDataUrl,
+              videoUrl,
+            });
+
+            console.log(`✅ Session document updated with R2 URLs`);
+            setUploadProgress('Upload complete!');
+          } catch (uploadError) {
+            console.error('❌ R2 upload failed:', uploadError);
+            // Don't fail the whole operation - session is already saved
+            console.warn('⚠️ Session saved but R2 upload failed');
+          } finally {
+            setIsUploadingToR2(false);
+          }
+        }
+
+        // Success!
+        setLastSavedSessionId(completedSession.sessionId);
+        
+        if (result.synced) {
+          console.log(`   ✅ Synced to Firestore`);
+        } else {
+          console.warn(`   ⚠️ Saved locally (pending Firestore sync)`);
         }
       } catch (error) {
         console.error('❌ Error sending session:', error);
+        setSaveError(error instanceof Error ? error.message : 'Unknown error');
+      } finally {
+        setIsSavingSession(false);
+        setUploadProgress('');
       }
     }
   };
@@ -414,6 +606,9 @@ export default function LiveCoaching() {
       }
       if (poseInitializedRef.current) {
         closePose();
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
       }
     };
   }, []);
@@ -576,6 +771,114 @@ export default function LiveCoaching() {
             Frames: {sessionAggregatorRef.current.getFrameCount()} | 
             Violations: {sessionAggregatorRef.current.getViolationCount()}
           </div>
+        </div>
+      )}
+
+      {/* Session Save Status Display */}
+      {(isSavingSession || isUploadingToR2) && (
+        <div style={{ 
+          maxWidth: "640px", 
+          margin: "0 auto 16px auto", 
+          padding: "12px", 
+          background: "linear-gradient(90deg, #3b82f620, #0ad4ff20)", 
+          border: "1px solid #3b82f6", 
+          borderRadius: "8px",
+          display: "flex",
+          alignItems: "center",
+          gap: "12px"
+        }}>
+          <div 
+            className="spinner"
+            style={{ 
+              width: "16px", 
+              height: "16px", 
+              border: "2px solid #3b82f6", 
+              borderTopColor: "transparent",
+              borderRadius: "50%"
+            }} 
+          />
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <span style={{ fontSize: "14px", fontWeight: 600, color: "#3b82f6" }}>
+              {isUploadingToR2 ? '☁️ Uploading to Cloud Storage...' : `💾 Saving session to ${user ? 'Firestore' : 'local storage'}...`}
+            </span>
+            {uploadProgress && (
+              <span style={{ fontSize: "12px", color: "#7dd3fc" }}>
+                {uploadProgress}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {lastSavedSessionId && !isSavingSession && !isUploadingToR2 && (
+        <div style={{ 
+          maxWidth: "640px", 
+          margin: "0 auto 16px auto", 
+          padding: "12px", 
+          background: "linear-gradient(90deg, #10b98120, #0ad4ff20)", 
+          border: "1px solid #10b981", 
+          borderRadius: "8px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }}>
+          <div>
+            <span style={{ fontSize: "14px", fontWeight: 700, color: "#10b981" }}>✅ Session Saved!</span>
+            <span style={{ fontSize: "12px", color: "#b9d7ff", marginLeft: "8px", display: "block" }}>
+              {user ? '☁️ Synced to Firestore + R2 Cloud Storage' : 'Saved locally'}
+            </span>
+          </div>
+          <button
+            onClick={() => setLastSavedSessionId(null)}
+            style={{
+              padding: "4px 8px",
+              fontSize: "11px",
+              background: "transparent",
+              color: "#10b981",
+              border: "1px solid #10b981",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontWeight: 600
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {saveError && !isSavingSession && !isUploadingToR2 && (
+        <div style={{ 
+          maxWidth: "640px", 
+          margin: "0 auto 16px auto", 
+          padding: "12px", 
+          background: "linear-gradient(90deg, #ef444420, #ff4d4f20)", 
+          border: "1px solid #ef4444", 
+          borderRadius: "8px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }}>
+          <div>
+            <span style={{ fontSize: "14px", fontWeight: 700, color: "#ef4444" }}>❌ Save Failed</span>
+            <span style={{ fontSize: "12px", color: "#ffb3b8", marginLeft: "8px", display: "block" }}>
+              {saveError}
+            </span>
+          </div>
+          <button
+            onClick={() => setSaveError(null)}
+            style={{
+              padding: "4px 8px",
+              fontSize: "11px",
+              background: "transparent",
+              color: "#ef4444",
+              border: "1px solid #ef4444",
+              borderRadius: "4px",
+              cursor: "pointer",
+              fontWeight: 600
+            }}
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

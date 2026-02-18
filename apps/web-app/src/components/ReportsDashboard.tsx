@@ -16,6 +16,7 @@ import { formatDuration, formatTimestamp } from '../types/session';
 import { fetchSessions } from '../services/sessionApi';
 import { buildAnalytics } from '../services/analyticsService';
 import SessionReport from './SessionReport';
+import { useAuth } from '../hooks/useAuth';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend);
 
@@ -25,17 +26,21 @@ function formatRuleName(ruleId: string): string {
 
 export default function ReportsDashboard() {
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [source, setSource] = useState<'backend' | 'local'>('local');
+  const [source, setSource] = useState<'firestore' | 'local'>('local');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  
+  // Get authenticated user
+  const { user } = useAuth();
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       setError(null);
       try {
-        const result = await fetchSessions();
+        const uid = user?.uid || null;
+        const result = await fetchSessions(uid);
         setSessions(result.sessions);
         setSource(result.source);
       } catch (loadError) {
@@ -47,7 +52,7 @@ export default function ReportsDashboard() {
     };
 
     load();
-  }, []);
+  }, [user]);
 
   const analytics = useMemo(() => buildAnalytics(sessions), [sessions]);
 
@@ -173,7 +178,7 @@ export default function ReportsDashboard() {
       <div style={{ border: '1px solid #1e3a4c', borderRadius: 12, padding: 16, background: '#0f1419' }}>
         <h2 style={{ margin: 0, color: '#e5faff', fontSize: 22 }}>Reports and Analytics</h2>
         <p style={{ margin: '8px 0 0', color: '#9ec5e9', fontSize: 13 }}>
-          Session source: {source === 'backend' ? 'Backend API' : 'Local storage'}
+          Session source: {source === 'firestore' ? 'Firestore' : 'Local storage'}
         </p>
       </div>
 
