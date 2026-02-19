@@ -1,39 +1,102 @@
-import { useState } from 'react';
+/**
+ * Account Settings Page
+ * 
+ * Firestore Schema (users/{uid}):
+ * {
+ *   name: string,
+ *   email: string,
+ *   createdAt: ISO timestamp,
+ *   updatedAt: ISO timestamp
+ * }
+ */
+
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { updateProfile } from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { useAuth } from '@/hooks/useAuth';
+import { db } from '@/firebase';
 import { AppShell } from '@/layouts/AppShell';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Badge } from '@/components/ui/Badge';
-import { Icons } from '@/components/ui/Icon';
 import { Modal } from '@/components/ui/Modal';
 
 export default function Account() {
   const { user } = useAuth();
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   
   const [profile, setProfile] = useState({
-    name: user?.displayName || 'User',
-    email: user?.email || '',
-    sport: 'Cricket',
-    level: 'Intermediate',
+    name: '',
+    email: '',
   });
 
-  const [preferences, setPreferences] = useState([
-    { id: 'email', label: 'Email Notifications', value: 'enabled', editable: true },
-    { id: 'privacy', label: 'Privacy Mode', value: 'disabled', editable: true },
-    { id: 'data', label: 'Data Sharing', value: 'enabled', editable: true },
-  ]);
+  // Load profile data from Firebase
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user) return;
 
-  const togglePreference = (id: string) => {
-    setPreferences(prefs => 
-      prefs.map(pref => 
-        pref.id === id 
-          ? { ...pref, value: pref.value === 'enabled' ? 'disabled' : 'enabled' }
-          : pref
-      )
-    );
+      // Set basic user data from Firebase Auth
+      setProfile(prev => ({
+        ...prev,
+        name: user.displayName || '',
+        email: user.email || '',
+      }));
+
+      // Load additional profile data from Firestore
+      try {
+        const userDocRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userDocRef);
+        
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          setProfile(prev => ({
+            ...prev,
+            name: data.name || user.displayName || '',
+          }));
+        }
+      } catch (err) {
+        console.error('Error loading profile:', err);
+      }
+    };
+
+    loadProfile();
+  }, [user]);
+
+  const handleSaveProfile = async () => {
+    if (!user) return;
+
+    setIsSaving(true);
+    setError(null);
+
+    try {
+      // Update Firebase Auth display name
+      await updateProfile(user, {
+        displayName: profile.name,
+      });
+
+      // Check if this is first time saving
+      const userDocRef = doc(db, 'users', user.uid);
+      const userDoc = await getDoc(userDocRef);
+      const isFirstSave = !userDoc.exists();
+
+      // Save additional profile data to Firestore
+      await setDoc(userDocRef, {
+        name: profile.name,
+        email: profile.email,
+        ...(isFirstSave && { createdAt: new Date().toISOString() }),
+        updatedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      setIsEditingProfile(false);
+    } catch (err) {
+      console.error('Error saving profile:', err);
+      setError('Failed to save profile. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDeleteAccount = () => {
@@ -58,7 +121,7 @@ export default function Account() {
             <div className="space-y-4">
               <div>
                 <p className="text-text-secondary text-sm mb-1">Name</p>
-                <p className="text-lg font-medium">{profile.name}</p>
+                <p className="text-lg font-medium">{profile.name || 'Not set'}</p>
               </div>
               <div>
                 <p className="text-text-secondary text-sm mb-1">Email</p>
@@ -73,32 +136,6 @@ export default function Account() {
                   Edit Profile
                 </Button>
               </div>
-            </div>
-          </Card>
-
-          {/* Preferences Section */}
-          <Card variant="elevated" className="p-8">
-            <h2 className="text-xl font-semibold mb-6">Preferences</h2>
-            <div className="space-y-4">
-              {preferences.map((pref) => (
-                <div key={pref.id} className="flex items-center justify-between py-4 border-b border-navy-700 last:border-0">
-                  <div>
-                    <p className="font-medium">{pref.label}</p>
-                    <Badge variant="default" size="sm">
-                      {pref.value}
-                    </Badge>
-                  </div>
-                  {pref.editable && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => togglePreference(pref.id)}
-                    >
-                      <Icons.Settings size="md" />
-                    </Button>
-                  )}
-                </div>
-              ))}
             </div>
           </Card>
 
@@ -145,10 +182,19 @@ export default function Account() {
           {/* Edit Profile Modal */}
           <Modal
             isOpen={isEditingProfile}
-            onClose={() => setIsEditingProfile(false)}
+            onClose={() => {
+              setIsEditingProfile(false);
+              setError(null);
+            }}
             title="Edit Profile"
           >
             <div className="space-y-4">
+              {error && (
+                <div className="p-3 bg-error-500/10 border border-error-500/20 rounded-lg">
+                  <p className="text-sm text-error-400">{error}</p>
+                </div>
+              )}
+              
               <div>
                 <label className="block text-sm font-medium mb-2">Name</label>
                 <input
@@ -156,37 +202,39 @@ export default function Account() {
                   value={profile.name}
                   onChange={(e) => setProfile({ ...profile, name: e.target.value })}
                   className="w-full px-4 py-2 bg-navy-800 border border-navy-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder="Enter your name"
                 />
               </div>
+
               <div>
-                <label className="block text-sm font-medium mb-2">Sport</label>
-                <select
-                  value={profile.sport}
-                  onChange={(e) => setProfile({ ...profile, sport: e.target.value })}
-                  className="w-full px-4 py-2 bg-navy-800 border border-navy-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
-                >
-                  <option value="Cricket">Cricket</option>
-                  <option value="Baseball">Baseball</option>
-                  <option value="Golf">Golf</option>
-                  <option value="Tennis">Tennis</option>
-                  <option value="Fitness">Fitness</option>
-                </select>
+                <label className="block text-sm font-medium mb-2">Email</label>
+                <input
+                  type="email"
+                  value={profile.email}
+                  disabled
+                  className="w-full px-4 py-2 bg-navy-900 border border-navy-700 rounded-lg text-gray-400 cursor-not-allowed"
+                  title="Email cannot be changed"
+                />
+                <p className="text-xs text-gray-400 mt-1">Email cannot be changed</p>
               </div>
+
               <div className="flex gap-3 justify-end pt-4">
                 <Button 
                   variant="ghost" 
-                  onClick={() => setIsEditingProfile(false)}
+                  onClick={() => {
+                    setIsEditingProfile(false);
+                    setError(null);
+                  }}
+                  disabled={isSaving}
                 >
                   Cancel
                 </Button>
                 <Button 
                   variant="primary" 
-                  onClick={() => {
-                    setIsEditingProfile(false);
-                    console.log('Profile updated:', profile);
-                  }}
+                  onClick={handleSaveProfile}
+                  disabled={isSaving || !profile.name.trim()}
                 >
-                  Save Changes
+                  {isSaving ? 'Saving...' : 'Save Changes'}
                 </Button>
               </div>
             </div>
