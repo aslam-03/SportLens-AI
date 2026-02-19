@@ -7,6 +7,11 @@ import { Button } from '@/components/ui/Button';
 import { Icons } from '@/components/ui/Icon';
 import { Badge } from '@/components/ui/Badge';
 import { motion, AnimatePresence } from 'framer-motion';
+import { initializePose, detectPose, closePose, PoseLandmarks } from '@/ai/poseEstimator';
+import { drawSkeleton } from '@/utils/drawSkeleton';
+import { calculateBiomechanics, AngleSmoother, BiomechanicsFrame } from '@/Biomechanics/angleCalculator';
+import { RuleEngine, RuleViolation } from '@/rules/ruleEngine';
+import { FITNESS_RULES } from '@/rules/fitnessRules';
 
 interface Activity {
   id: string;
@@ -94,6 +99,18 @@ export default function LiveCoaching() {
   const [sessionTime, setSessionTime] = useState(0);
   const [feedbackVisible, setFeedbackVisible] = useState(true);
   const [currentMetrics, setCurrentMetrics] = useState<Metric[]>([]);
+  const [poseInitialized, setPoseInitialized] = useState(false);
+  const animationFrameRef = useRef<number | null>(null);
+  const [realTimeFeedback, setRealTimeFeedback] = useState<Array<{id: number; type: string; message: string; timestamp: string}>>([]);
+  const [currentBiomechanics, setCurrentBiomechanics] = useState<BiomechanicsFrame | null>(null);
+  const isDetectionActiveRef = useRef(false);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const lastValidMetricsRef = useRef<Metric[]>([]);
+  
+  // Rule engine and smoother instances
+  const ruleEngineRef = useRef<RuleEngine | null>(null);
+  const smootherRef = useRef<AngleSmoother>(new AngleSmoother(5));
+  const feedbackIdCounter = useRef(0);
 
   const currentUser: User = {
     name: user?.displayName || user?.email?.split('@')[0] || 'User',
@@ -101,54 +118,21 @@ export default function LiveCoaching() {
     initials: user?.displayName?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'
   };
 
-  // Mock real-time metrics
-  const metrics: Metric[] = [
-    {
-      label: 'Posture Score',
-      value: 87,
-      unit: '%',
-      status: 'good'
-    },
-    {
-      label: 'Balance',
-      value: 92,
-      unit: '%',
-      status: 'good'
-    },
-    {
-      label: 'Alignment',
-      value: 78,
-      unit: '%',
-      status: 'warning'
-    },
-    {
-      label: 'Form Consistency',
-      value: 85,
-      unit: '%',
-      status: 'good'
+  // Initialize rule engine when activity is selected
+  useEffect(() => {
+    if (selectedActivity) {
+      const engine = new RuleEngine({ defaultCooldownMs: 3000, maxActiveViolations: 3 });
+      
+      // Load rules based on activity category
+      if (selectedActivity.category === 'fitness') {
+        engine.addRules(FITNESS_RULES);
+      }
+      // Cricket rules can be added here when available
+      
+      ruleEngineRef.current = engine;
+      smootherRef.current.reset();
     }
-  ];
-
-  const realTimeFeedback = [
-    {
-      id: 1,
-      type: 'success',
-      message: 'Great posture! Keep your shoulders relaxed.',
-      timestamp: 'now'
-    },
-    {
-      id: 2,
-      type: 'warning',
-      message: 'Try to keep your feet shoulder-width apart.',
-      timestamp: '5s ago'
-    },
-    {
-      id: 3,
-      type: 'info',
-      message: 'Your stance is improving! 🎯',
-      timestamp: '12s ago'
-    }
-  ];
+  }, [selectedActivity]);
 
   // Timer effect
   useEffect(() => {
@@ -161,9 +145,66 @@ export default function LiveCoaching() {
     return () => clearInterval(interval);
   }, [isSessionActive]);
 
-  // Initialize camera
+  // Handle pose detection results
+  const handlePoseResults = (results: PoseLandmarks) => {
+    console.log('Pose results received:', results ? 'Landmarks detected' : 'No landmarks');
+    
+    // Draw skeleton overlay on canvas
+    if (canvasRef.current && results) {
+      drawSkeleton(canvasRef.current, results, {
+        jointColor: '#00D9FF', // Bright cyan for visibility
+        lineColor: '#0080FF', // Blue for connections
+        jointRadius: 8,
+        lineWidth: 3
+      });
+    }
+
+    // Calculate real biomechanics
+    const biomechanics = calculateBiomechanics(results, 0.5);
+    const smoothedBiomechanics = smootherRef.current.smoothFrame(biomechanics);
+    setCurrentBiomechanics(smoothedBiomechanics);
+
+    // Update metrics based on real biomechanics
+    updateMetricsFromBiomechanics(smoothedBiomechanics);
+
+    // Evaluate rules and generate feedback
+    if (ruleEngineRef.current) {
+      const violations = ruleEngineRef.current.evaluate(smoothedBiomechanics);
+      updateFeedbackFromViolations(violations);
+    }
+  };
+
+  // Start continuous pose detection with proper ref tracking
+  const startPoseDetectionLoop = () => {
+    console.log('Starting pose detection loop');
+    isDetectionActiveRef.current = true;
+    
+    const detectFrame = async () => {
+      if (!isDetectionActiveRef.current) {
+        console.log('Detection stopped');
+        return;
+      }
+
+      if (videoRef.current && videoRef.current.readyState === 4) {
+        try {
+          await detectPose(videoRef.current);
+        } catch (error) {
+          console.error('Pose detection error:', error);
+        }
+      }
+
+      animationFrameRef.current = requestAnimationFrame(detectFrame);
+    };
+    
+    detectFrame();
+  };
+
+  // Initialize camera and pose detection
   useEffect(() => {
-    if (isSessionActive && videoRef.current) {
+    if (isSessionActive && videoRef.current && canvasRef.current) {
+      console.log('Initializing camera and pose detection...');
+      setIsInitializing(true);
+      
       const accessCamera = async () => {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
@@ -174,19 +215,82 @@ export default function LiveCoaching() {
             },
             audio: false
           });
+          
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
+            console.log('Camera stream set');
+            
+            // Wait for video metadata to load
+            await new Promise<void>((resolve) => {
+              if (videoRef.current) {
+                videoRef.current.onloadedmetadata = () => {
+                  console.log('Video metadata loaded');
+                  resolve();
+                };
+              }
+            });
+            
+            if (videoRef.current && canvasRef.current) {
+              // Set canvas size to match video
+              canvasRef.current.width = videoRef.current.videoWidth;
+              canvasRef.current.height = videoRef.current.videoHeight;
+              console.log(`Canvas size set to ${canvasRef.current.width}x${canvasRef.current.height}`);
+              
+              // Wait for video to actually play
+              await videoRef.current.play();
+              console.log('Video playing');
+              
+              // Initialize pose detection
+              try {
+                console.log('Initializing MediaPipe Pose...');
+                await initializePose(videoRef.current, handlePoseResults);
+                setPoseInitialized(true);
+                console.log('✓ Pose detection initialized successfully');
+                
+                // Small delay to ensure everything is ready
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                setIsInitializing(false);
+                
+                // Start pose detection loop
+                console.log('Starting detection loop...');
+                startPoseDetectionLoop();
+              } catch (error) {
+                console.error('❌ Failed to initialize pose detection:', error);
+                setIsInitializing(false);
+                alert('Failed to initialize pose detection. Please refresh and try again.');
+              }
+            }
           }
         } catch (error) {
-          console.error('Error accessing camera:', error);
+          console.error('❌ Error accessing camera:', error);
+          setIsInitializing(false);
           alert('Unable to access camera. Please check permissions.');
           setIsSessionActive(false);
         }
       };
+      
       accessCamera();
     }
 
     return () => {
+      console.log('Cleaning up pose detection...');
+      setIsInitializing(false);
+      
+      // Stop pose detection loop
+      isDetectionActiveRef.current = false;
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      
+      // Close pose detector
+      if (poseInitialized) {
+        closePose();
+        setPoseInitialized(false);
+      }
+      
+      // Stop camera
       if (videoRef.current && videoRef.current.srcObject) {
         const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
         tracks.forEach((track) => track.stop());
@@ -206,6 +310,7 @@ export default function LiveCoaching() {
       setIsSessionActive(false);
       setSessionTime(0);
       setCurrentMetrics([]);
+      lastValidMetricsRef.current = [];
       // Stop camera
       if (videoRef.current && videoRef.current.srcObject) {
         const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
@@ -214,16 +319,14 @@ export default function LiveCoaching() {
     } else {
       // Start session
       setIsSessionActive(true);
-      // Initialize metrics based on selected activity
-      if (selectedActivity) {
-        const initialMetrics: Metric[] = selectedActivity.metrics.map((label, index) => ({
-          label,
-          value: Math.floor(Math.random() * 30) + 70, // Random 70-100
-          unit: '%',
-          status: 'good' as const
-        }));
-        setCurrentMetrics(initialMetrics);
+      setCurrentMetrics([]);
+      setRealTimeFeedback([]);
+      setCurrentBiomechanics(null);
+      lastValidMetricsRef.current = [];
+      if (ruleEngineRef.current) {
+        ruleEngineRef.current.reset();
       }
+      smootherRef.current.reset();
     }
   };
 
@@ -238,38 +341,202 @@ export default function LiveCoaching() {
     setSelectedActivity(null);
   };
 
-  // Update metrics in real-time during session
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isSessionActive && selectedActivity) {
-      interval = setInterval(() => {
-        setCurrentMetrics(prev => 
-          prev.map(metric => {
-            const change = Math.floor(Math.random() * 10) - 5; // -5 to +5
-            const newValue = Math.max(0, Math.min(100, metric.value + change));
-            let status: 'good' | 'warning' | 'critical' = 'good';
-            if (newValue < 60) status = 'critical';
-            else if (newValue < 75) status = 'warning';
-            
-            return { ...metric, value: newValue, status };
-          })
-        );
-      }, 2000); // Update every 2 seconds
-    }
-    return () => clearInterval(interval);
-  }, [isSessionActive, selectedActivity]);
+  // Convert biomechanics to display metrics
+  const updateMetricsFromBiomechanics = (biomechanics: BiomechanicsFrame) => {
+    if (!selectedActivity) return;
 
-  const handleCaptureFrame = () => {
-    if (canvasRef.current && videoRef.current) {
-      const context = canvasRef.current.getContext('2d');
-      if (context) {
-        canvasRef.current.width = videoRef.current.videoWidth;
-        canvasRef.current.height = videoRef.current.videoHeight;
-        context.drawImage(videoRef.current, 0, 0);
-        // Frame captured and drawn to canvas - could save via API here
-        console.log('Frame captured successfully');
-      }
+    const metrics: Metric[] = [];
+
+    // Map activity-specific metrics
+    switch (selectedActivity.id) {
+      case 'squat-form':
+      case 'lunge-form':
+        // Knee Angle
+        if (biomechanics.leftKneeAngle !== null) {
+          metrics.push({
+            label: 'Knee Angle',
+            value: Math.round(biomechanics.leftKneeAngle),
+            unit: '°',
+            status: biomechanics.leftKneeAngle >= 70 && biomechanics.leftKneeAngle <= 110 ? 'good' : 
+                   biomechanics.leftKneeAngle >= 60 && biomechanics.leftKneeAngle <= 120 ? 'warning' : 'critical'
+          });
+        }
+        
+        // Hip Depth
+        if (biomechanics.leftHipAngle !== null) {
+          metrics.push({
+            label: 'Hip Depth',
+            value: Math.round(biomechanics.leftHipAngle),
+            unit: '°',
+            status: biomechanics.leftHipAngle >= 100 && biomechanics.leftHipAngle <= 160 ? 'good' : 'warning'
+          });
+        }
+        
+        // Back Angle (shoulder angle indicates torso position)
+        if (biomechanics.leftShoulderAngle !== null) {
+          metrics.push({
+            label: 'Back Angle',
+            value: Math.round(biomechanics.leftShoulderAngle),
+            unit: '°',
+            status: biomechanics.leftShoulderAngle >= 50 && biomechanics.leftShoulderAngle <= 90 ? 'good' : 'warning'
+          });
+        }
+        break;
+
+      case 'plank-hold':
+        // Body Alignment
+        if (biomechanics.leftHipAngle !== null && biomechanics.leftShoulderAngle !== null) {
+          const avgAlignment = (biomechanics.leftHipAngle + biomechanics.leftShoulderAngle) / 2;
+          metrics.push({
+            label: 'Alignment',
+            value: Math.round(avgAlignment),
+            unit: '°',
+            status: avgAlignment >= 150 && avgAlignment <= 180 ? 'good' : 'warning'
+          });
+        }
+        
+        // Core Engagement (hip stability)
+        if (biomechanics.leftHipAngle !== null && biomechanics.rightHipAngle !== null) {
+          const hipStability = 180 - Math.abs(biomechanics.leftHipAngle - biomechanics.rightHipAngle);
+          metrics.push({
+            label: 'Core Stability',
+            value: Math.round(hipStability),
+            unit: '%',
+            status: hipStability >= 95 ? 'good' : hipStability >= 85 ? 'warning' : 'critical'
+          });
+        }
+        break;
+
+      case 'batting-stance':
+      case 'bowling-action':
+      case 'fielding-position':
+        // Cricket activities - full body tracking
+        
+        // Stance/Balance
+        if (biomechanics.leftKneeAngle !== null && biomechanics.rightKneeAngle !== null) {
+          const avgKnee = (biomechanics.leftKneeAngle + biomechanics.rightKneeAngle) / 2;
+          metrics.push({
+            label: 'Stance',
+            value: Math.round(avgKnee),
+            unit: '°',
+            status: avgKnee >= 140 && avgKnee <= 175 ? 'good' : 'warning'
+          });
+        }
+        
+        // Shoulder Alignment
+        if (biomechanics.leftShoulderAngle !== null && biomechanics.rightShoulderAngle !== null) {
+          const shoulderDiff = Math.abs(biomechanics.leftShoulderAngle - biomechanics.rightShoulderAngle);
+          metrics.push({
+            label: 'Shoulders',
+            value: Math.round(100 - shoulderDiff),
+            unit: '%',
+            status: shoulderDiff < 10 ? 'good' : shoulderDiff < 20 ? 'warning' : 'critical'
+          });
+        }
+        
+        // Hip Rotation
+        if (biomechanics.leftHipAngle !== null) {
+          metrics.push({
+            label: 'Hip Angle',
+            value: Math.round(biomechanics.leftHipAngle),
+            unit: '°',
+            status: biomechanics.leftHipAngle >= 140 && biomechanics.leftHipAngle <= 180 ? 'good' : 'warning'
+          });
+        }
+        
+        // Arm Angle (for bowling/batting)
+        if (biomechanics.leftElbowAngle !== null) {
+          metrics.push({
+            label: 'Arm Angle',
+            value: Math.round(biomechanics.leftElbowAngle),
+            unit: '°',
+            status: 'good'
+          });
+        }
+        break;
+
+      default:
+        // Generic metrics for other activities
+        if (biomechanics.leftKneeAngle !== null) {
+          metrics.push({
+            label: 'Knee',
+            value: Math.round(biomechanics.leftKneeAngle),
+            unit: '°',
+            status: 'good'
+          });
+        }
+        if (biomechanics.leftElbowAngle !== null) {
+          metrics.push({
+            label: 'Elbow',
+            value: Math.round(biomechanics.leftElbowAngle),
+            unit: '°',
+            status: 'good'
+          });
+        }
     }
+
+    // Add balance/alignment metric if we have bilateral data
+    if (biomechanics.leftKneeAngle !== null && biomechanics.rightKneeAngle !== null) {
+      const diff = Math.abs(biomechanics.leftKneeAngle - biomechanics.rightKneeAngle);
+      metrics.push({
+        label: 'Balance',
+        value: Math.round(100 - diff),
+        unit: '%',
+        status: diff < 5 ? 'good' : diff < 10 ? 'warning' : 'critical'
+      });
+    }
+
+    // Calculate overall posture/form score (percentage of metrics in good status)
+    if (metrics.length > 0) {
+      const goodMetrics = metrics.filter(m => m.status === 'good').length;
+      const totalMetrics = metrics.length;
+      const score = Math.round((goodMetrics / totalMetrics) * 100);
+      
+      metrics.unshift({
+        label: 'Form Score',
+        value: score,
+        unit: '%',
+        status: score >= 80 ? 'good' : score >= 60 ? 'warning' : 'critical'
+      });
+    }
+
+    // Always update metrics
+    if (metrics.length > 0) {
+      // Store as last valid metrics
+      lastValidMetricsRef.current = metrics;
+      setCurrentMetrics(metrics);
+    } else if (lastValidMetricsRef.current.length > 0) {
+      // If no new metrics but we have last valid ones, keep showing them
+      // This prevents metrics from disappearing when person temporarily moves out of frame
+      setCurrentMetrics(lastValidMetricsRef.current);
+    } else {
+      // No metrics at all yet
+      setCurrentMetrics([]);
+    }
+  };
+
+  // Update feedback messages from rule violations
+  const updateFeedbackFromViolations = (violations: RuleViolation[]) => {
+    const newFeedback = violations.map(v => {
+      const timeAgo = Math.floor((Date.now() - v.timestamp) / 1000);
+      return {
+        id: feedbackIdCounter.current++,
+        type: v.severity === 'error' ? 'warning' : v.severity === 'warning' ? 'warning' : 'info',
+        message: v.message,
+        timestamp: timeAgo === 0 ? 'now' : `${timeAgo}s ago`
+      };
+    });
+
+    setRealTimeFeedback(prev => {
+      // Keep only recent feedback (last 10 seconds)
+      const recent = prev.filter(f => {
+        const match = f.timestamp.match(/(\d+)s ago/);
+        if (!match) return true; // Keep 'now'
+        return parseInt(match[1]) < 10;
+      });
+      // Add new feedback
+      return [...newFeedback, ...recent].slice(0, 5);
+    });
   };
 
   const handleLogout = async () => {
@@ -351,6 +618,27 @@ export default function LiveCoaching() {
                   className="absolute inset-0 w-full h-full"
                 />
 
+                {/* Loading Indicator for Pose Detection */}
+                {isInitializing && (
+                  <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-20">
+                    <div className="bg-navy-900/90 rounded-lg p-6 text-center">
+                      <div className="w-16 h-16 mx-auto mb-4 border-4 border-primary-400 border-t-transparent rounded-full animate-spin"></div>
+                      <p className="text-white font-semibold mb-2">Initializing AI Pose Detection</p>
+                      <p className="text-gray-400 text-sm">Loading MediaPipe from CDN...</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Pose Detection Status */}
+                {!isInitializing && poseInitialized && (
+                  <div className="absolute top-20 left-4 z-10">
+                    <Badge variant="success" className="bg-success-500/20 backdrop-blur border-success-500/30">
+                      <Icons.Check size="sm" className="mr-1" />
+                      AI Active
+                    </Badge>
+                  </div>
+                )}
+
                 {/* Overlay Controls */}
                 <div className="absolute top-4 left-4 right-4 z-10">
                   <div className="flex items-center justify-between">
@@ -369,20 +657,35 @@ export default function LiveCoaching() {
                 </div>
 
                 {/* Floating Metrics (Mobile) */}
-                <div className="absolute bottom-4 left-4 right-4 lg:hidden z-10">
-                  <div className="grid grid-cols-4 gap-2">
-                    {currentMetrics.map((metric) => (
-                      <div
-                        key={metric.label}
-                        className="bg-navy-900/80 backdrop-blur rounded-lg p-2 text-center border border-navy-700"
-                      >
-                        <p className="text-text-muted text-xs mb-1">{metric.label.split(' ')[0]}</p>
-                        <p className={`text-lg font-bold ${getStatusColor(metric.status)}`}>
-                          {metric.value}
-                        </p>
+                <div className="absolute bottom-4 left-4 right-4 lg:hidden z-10 max-h-56 overflow-y-auto">
+                  {currentMetrics.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      {currentMetrics.map((metric, index) => (
+                        <motion.div
+                          key={metric.label}
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: index * 0.05 }}
+                          className="bg-navy-900/95 backdrop-blur-md rounded-xl p-3 text-center border border-navy-700 shadow-lg"
+                        >
+                          <p className="text-gray-400 text-xs mb-1.5 font-medium truncate">{metric.label}</p>
+                          <div className="flex items-baseline justify-center gap-1">
+                            <p className={`text-2xl font-bold ${getStatusColor(metric.status)}`}>
+                              {metric.value}
+                            </p>
+                            <span className="text-xs text-gray-500">{metric.unit}</span>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  ) : (
+                    !isInitializing && (
+                      <div className="bg-navy-900/95 backdrop-blur-md rounded-xl p-4 text-center border border-navy-700 shadow-lg">
+                        <Icons.Activity size="md" className="text-gray-500 mx-auto mb-2" />
+                        <p className="text-gray-400 text-sm">Position yourself in frame</p>
                       </div>
-                    ))}
-                  </div>
+                    )
+                  )}
                 </div>
               </>
             ) : (
@@ -423,25 +726,15 @@ export default function LiveCoaching() {
           <div className="flex-shrink-0 bg-navy-900 border-t border-navy-800 p-4">
             <div className="flex items-center justify-center gap-4">
               {isSessionActive ? (
-                <>
-                  <Button
-                    variant="danger"
-                    size="lg"
-                    onClick={handleStartStop}
-                    className="min-w-[160px]"
-                  >
-                    <Icons.Stop size="md" className="mr-2" />
-                    End Session
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="lg"
-                    onClick={handleCaptureFrame}
-                  >
-                    <Icons.Camera size="md" className="mr-2" />
-                    Capture
-                  </Button>
-                </>
+                <Button
+                  variant="danger"
+                  size="lg"
+                  onClick={handleStartStop}
+                  className="min-w-[160px]"
+                >
+                  <Icons.Stop size="md" className="mr-2" />
+                  End Session
+                </Button>
               ) : null}
             </div>
           </div>
@@ -457,40 +750,51 @@ export default function LiveCoaching() {
 
           {/* Metrics List */}
           <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            {currentMetrics.map((metric) => (
-              <motion.div
-                key={metric.label}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                className={`p-4 rounded-lg border ${
-                  metric.status === 'good'
-                    ? 'border-success-500/30 bg-success-500/5'
-                    : metric.status === 'warning'
-                    ? 'border-warning-500/30 bg-warning-500/5'
-                    : 'border-danger-500/30 bg-danger-500/5'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm text-gray-300 font-medium">{metric.label}</p>
-                  <Badge
-                    variant={
-                      metric.status === 'good'
-                        ? 'success'
-                        : metric.status === 'warning'
-                        ? 'warning'
-                        : 'default'
-                    }
-                    size="sm"
-                    className={metric.status === 'critical' ? 'bg-danger-500/20 text-danger-500 border-danger-500/30' : ''}
-                  >
-                    {metric.status || 'N/A'}
-                  </Badge>
+            {currentMetrics.length > 0 ? (
+              currentMetrics.map((metric) => (
+                <motion.div
+                  key={metric.label}
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className={`p-4 rounded-lg border ${
+                    metric.status === 'good'
+                      ? 'border-success-500/30 bg-success-500/5'
+                      : metric.status === 'warning'
+                      ? 'border-warning-500/30 bg-warning-500/5'
+                      : 'border-danger-500/30 bg-danger-500/5'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-gray-300 font-medium">{metric.label}</p>
+                    <Badge
+                      variant={
+                        metric.status === 'good'
+                          ? 'success'
+                          : metric.status === 'warning'
+                          ? 'warning'
+                          : 'default'
+                      }
+                      size="sm"
+                      className={metric.status === 'critical' ? 'bg-danger-500/20 text-danger-500 border-danger-500/30' : ''}
+                    >
+                      {metric.status || 'N/A'}
+                    </Badge>
+                  </div>
+                  <p className={`text-3xl font-bold ${getStatusColor(metric.status)}`}>
+                    {metric.value}
+                  </p>
+                </motion.div>
+              ))
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <div className="p-4 bg-primary-500/10 rounded-full mb-4">
+                  <Icons.Activity size="lg" className="text-primary-400" />
                 </div>
-                <p className={`text-3xl font-bold ${getStatusColor(metric.status)}`}>
-                  {metric.value}
+                <p className="text-gray-400 text-sm">
+                  {isInitializing ? 'Initializing pose detection...' : 'Position yourself in frame to see metrics'}
                 </p>
-              </motion.div>
-            ))}
+              </div>
+            )}
           </div>
 
           {/* Feedback Panel (if active) */}
