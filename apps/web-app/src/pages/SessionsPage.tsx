@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { AppShell } from '@/layouts/AppShell';
 import { Button } from '@/components/ui/Button';
@@ -7,6 +8,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Icons } from '@/components/ui/Icon';
 
 export default function Sessions() {
+  const navigate = useNavigate();
   const [sessions] = useState([
     {
       id: '1',
@@ -34,11 +36,25 @@ export default function Sessions() {
           animate={{ opacity: 1 }}
           className="container mx-auto px-4 py-8"
         >
-          <h1 className="text-3xl font-bold mb-8">Session History</h1>
+          <div className="flex items-center justify-between mb-8">
+            <h1 className="text-3xl font-bold">Session History</h1>
+            <Button 
+              variant="primary" 
+              onClick={() => navigate('/coaching')}
+            >
+              <Icons.Play size="sm" className="mr-2" />
+              New Session
+            </Button>
+          </div>
 
           <div className="space-y-4">
             {sessions.map((session) => (
-              <Card key={session.id} className="p-6" hoverable>
+              <Card 
+                key={session.id} 
+                className="p-6 cursor-pointer" 
+                hoverable
+                onClick={() => navigate(`/sessions/${session.id}`)}
+              >
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
                     <h3 className="text-lg font-semibold mb-2">{session.sport}</h3>
@@ -49,8 +65,15 @@ export default function Sessions() {
                       {session.type}
                     </Badge>
                   </div>
-                  <Button variant="ghost" size="sm">
-                    <Icons.Play size="md" />
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/sessions/${session.id}`);
+                    }}
+                  >
+                    <Icons.ChevronRight size="md" />
                   </Button>
                 </div>
               </Card>

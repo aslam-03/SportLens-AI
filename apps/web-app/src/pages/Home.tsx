@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
 import { AppShell } from '@/layouts/AppShell';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -26,13 +28,15 @@ interface User {
 }
 
 export default function Home() {
+  const navigate = useNavigate();
+  const { user, signOutUser } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
 
-  // Mock user data
+  // Current user from auth
   const currentUser: User = {
-    name: 'Alex Athlete',
-    email: 'alex@sportlens.ai',
-    initials: 'AA'
+    name: user?.displayName || user?.email?.split('@')[0] || 'User',
+    email: user?.email || '',
+    initials: user?.displayName?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'
   };
 
   // Mock recent sessions data
@@ -79,16 +83,20 @@ export default function Home() {
     setIsLoading(true);
     setTimeout(() => {
       setIsLoading(false);
-      alert('Starting new session...');
-    }, 500);
+      navigate('/coaching');
+    }, 300);
   };
 
-  const handleLogout = () => {
-    alert('Logging out...');
+  const handleLogout = async () => {
+    try {
+      await signOutUser();
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
 
   const handleViewSession = (sessionId: string) => {
-    alert(`Viewing session ${sessionId}`);
+    navigate(`/sessions/${sessionId}`);
   };
 
   const containerVariants = {
@@ -171,9 +179,9 @@ export default function Home() {
                   variant="ghost"
                   size="sm"
                   className="flex-1"
-                  onClick={() => alert('View tips')}
+                  onClick={() => navigate('/coaching')}
                 >
-                  Tips
+                  Practice
                 </Button>
               </div>
             </div>
@@ -240,7 +248,7 @@ export default function Home() {
             <Button
               variant="secondary"
               className="w-full h-auto py-4 flex flex-col items-center gap-2"
-              onClick={() => alert('View sessions')}
+              onClick={() => navigate('/sessions')}
             >
               <Icons.Video size="lg" />
               <span className="text-sm">View Sessions</span>
@@ -248,7 +256,7 @@ export default function Home() {
             <Button
               variant="secondary"
               className="w-full h-auto py-4 flex flex-col items-center gap-2"
-              onClick={() => alert('View reports')}
+              onClick={() => navigate('/reports')}
             >
               <Icons.TrendingUp size="lg" />
               <span className="text-sm">View Reports</span>
@@ -256,10 +264,10 @@ export default function Home() {
             <Button
               variant="secondary"
               className="w-full h-auto py-4 flex flex-col items-center gap-2"
-              onClick={() => alert('View tips')}
+              onClick={() => navigate('/account')}
             >
               <Icons.Info size="lg" />
-              <span className="text-sm">Get Tips</span>
+              <span className="text-sm">Account</span>
             </Button>
           </div>
         </motion.div>
@@ -269,7 +277,7 @@ export default function Home() {
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-text-primary">Recent Sessions</h3>
             <button
-              onClick={() => alert('View all sessions')}
+              onClick={() => navigate('/sessions')}
               className="text-primary-500 text-sm font-medium hover:text-primary-400 transition-colors"
             >
               See all

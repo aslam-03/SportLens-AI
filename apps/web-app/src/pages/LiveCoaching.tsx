@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/hooks/useAuth';
 import { AppShell } from '@/layouts/AppShell';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -21,6 +23,8 @@ interface User {
 }
 
 export default function LiveCoaching() {
+  const navigate = useNavigate();
+  const { user, signOutUser } = useAuth();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -30,9 +34,9 @@ export default function LiveCoaching() {
   const [feedbackVisible, setFeedbackVisible] = useState(true);
 
   const currentUser: User = {
-    name: 'Alex Athlete',
-    email: 'alex@sportlens.ai',
-    initials: 'AA'
+    name: user?.displayName || user?.email?.split('@')[0] || 'User',
+    email: user?.email || '',
+    initials: user?.displayName?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'
   };
 
   // Mock real-time metrics
@@ -140,11 +144,29 @@ export default function LiveCoaching() {
   };
 
   const handleCaptureFrame = () => {
-    alert('Frame captured! Saving to session...');
+    if (canvasRef.current && videoRef.current) {
+      const context = canvasRef.current.getContext('2d');
+      if (context) {
+        canvasRef.current.width = videoRef.current.videoWidth;
+        canvasRef.current.height = videoRef.current.videoHeight;
+        context.drawImage(videoRef.current, 0, 0);
+        // Frame captured and drawn to canvas - could save via API here
+        console.log('Frame captured successfully');
+      }
+    }
   };
 
-  const handleLogout = () => {
-    alert('Logging out...');
+  const handleLogout = async () => {
+    try {
+      // Stop camera first
+      if (videoRef.current && videoRef.current.srcObject) {
+        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+        tracks.forEach((track) => track.stop());
+      }
+      await signOutUser();
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
 
   const getStatusColor = (status?: string) => {

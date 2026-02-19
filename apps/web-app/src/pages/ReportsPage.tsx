@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { AppShell } from '@/layouts/AppShell';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 
 export default function Reports() {
+  const navigate = useNavigate();
   const [reports] = useState([
     {
       id: '1',
@@ -40,7 +42,11 @@ export default function Reports() {
                 <div className="text-3xl font-bold text-success-500 mb-6">
                   {report.improvement}
                 </div>
-                <Button variant="primary" size="sm">
+                <Button 
+                  variant="primary" 
+                  size="sm"
+                  onClick={() => navigate(`/reports/${report.id}`)}
+                >
                   View Details
                 </Button>
               </Card>
