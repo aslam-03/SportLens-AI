@@ -12,6 +12,9 @@ import { drawSkeleton } from '@/utils/drawSkeleton';
 import { calculateBiomechanics, AngleSmoother, BiomechanicsFrame } from '@/Biomechanics/angleCalculator';
 import { RuleEngine, RuleViolation } from '@/rules/ruleEngine';
 import { FITNESS_RULES } from '@/rules/fitnessRules';
+import { SessionAggregator } from '@/utils/sessionAggregator';
+import { saveSessionToFirestore, updateSessionR2Objects } from '@/services/firestoreSessionService';
+import { uploadKeypointsToR2, uploadVideoToR2 } from '@/services/r2UploadService';
 
 interface Activity {
   id: string;
@@ -112,6 +115,21 @@ export default function LiveCoaching() {
   const smootherRef = useRef<AngleSmoother>(new AngleSmoother(5));
   const feedbackIdCounter = useRef(0);
 
+  // Session management
+  const sessionAggregatorRef = useRef<SessionAggregator>(new SessionAggregator());
+  const sessionStartTimeRef = useRef<number>(0);
+
+  // Video recording
+  const streamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+
+  // Session save states
+  const [isSavingSession, setIsSavingSession] = useState(false);
+  const [saveProgress, setSaveProgress] = useState<string>('');
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const currentUser: User = {
     name: user?.displayName || user?.email?.split('@')[0] || 'User',
     email: user?.email || '',
@@ -164,12 +182,23 @@ export default function LiveCoaching() {
     const smoothedBiomechanics = smootherRef.current.smoothFrame(biomechanics);
     setCurrentBiomechanics(smoothedBiomechanics);
 
+    // Add frame to session aggregator if session is active
+    if (sessionAggregatorRef.current.isActive()) {
+      sessionAggregatorRef.current.addFrame(smoothedBiomechanics);
+    }
+
     // Update metrics based on real biomechanics
     updateMetricsFromBiomechanics(smoothedBiomechanics);
 
     // Evaluate rules and generate feedback
     if (ruleEngineRef.current) {
       const violations = ruleEngineRef.current.evaluate(smoothedBiomechanics);
+      
+      // Add violations to session aggregator if session is active
+      if (sessionAggregatorRef.current.isActive() && violations.length > 0) {
+        sessionAggregatorRef.current.addViolations(violations);
+      }
+      
       updateFeedbackFromViolations(violations);
     }
   };
@@ -215,6 +244,9 @@ export default function LiveCoaching() {
             },
             audio: false
           });
+          
+          // Store stream reference for video recording
+          streamRef.current = stream;
           
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
@@ -304,29 +336,181 @@ export default function LiveCoaching() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleStartStop = () => {
+  // Start video recording
+  const startVideoRecording = () => {
+    const stream = videoRef.current?.srcObject as MediaStream;
+    if (!stream) {
+      console.warn('[VideoRecording] No stream available');
+      return;
+    }
+
+    try {
+      recordedChunksRef.current = [];
+      const options = {
+        mimeType: 'video/webm;codecs=vp9',
+        videoBitsPerSecond: 2500000,
+      };
+
+      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+        options.mimeType = 'video/webm';
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, options);
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          recordedChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start(1000);
+      setIsRecording(true);
+      console.log('🎥 Video recording started');
+    } catch (error) {
+      console.error('Failed to start video recording:', error);
+    }
+  };
+
+  // Stop video recording
+  const stopVideoRecording = (): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+      const mediaRecorder = mediaRecorderRef.current;
+      
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        resolve(null);
+        return;
+      }
+
+      mediaRecorder.onstop = () => {
+        if (recordedChunksRef.current.length === 0) {
+          resolve(null);
+          return;
+        }
+        const videoBlob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+        setIsRecording(false);
+        console.log(`🎥 Video recorded: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
+        resolve(videoBlob);
+      };
+
+      mediaRecorder.stop();
+    });
+  };
+
+  // Save session with R2 upload
+  const saveSession = async (videoBlob: Blob | null) => {
+    const completedSession = sessionAggregatorRef.current.stopSession();
+    if (!completedSession || !user?.uid) {
+      console.warn('No session to save or user not authenticated');
+      return;
+    }
+
+    setIsSavingSession(true);
+    setSaveError(null);
+    setSaveProgress('Saving session...');
+
+    try {
+      // Save to Firestore
+      await saveSessionToFirestore(user.uid, completedSession);
+      console.log('✅ Session saved to Firestore');
+
+      // Upload to R2 if video available
+      if (videoBlob) {
+        setSaveProgress('Uploading video...');
+        
+        const sessionData = {
+          sessionId: completedSession.sessionId,
+          activityType: completedSession.activityType,
+          startTime: completedSession.startTime,
+          endTime: completedSession.endTime,
+          duration: completedSession.duration,
+          metrics: completedSession.metrics,
+        };
+
+        const sessionDataUrl = await uploadKeypointsToR2(
+          completedSession.sessionId,
+          [sessionData]
+        );
+
+        const videoUrl = await uploadVideoToR2(
+          completedSession.sessionId,
+          videoBlob,
+          'session.webm'
+        );
+
+        await updateSessionR2Objects(user.uid, completedSession.sessionId, {
+          sessionDataUrl,
+          videoUrl,
+        });
+
+        console.log('✅ Video uploaded to R2');
+      }
+
+      setSaveProgress('Session saved successfully!');
+      setTimeout(() => {
+        setSaveProgress('');
+        navigate('/sessions');
+      }, 2000);
+    } catch (error) {
+      console.error('❌ Error saving session:', error);
+      setSaveError(error instanceof Error ? error.message : 'Failed to save session');
+    } finally {
+      setIsSavingSession(false);
+    }
+  };
+
+  const handleStartStop = async () => {
     if (isSessionActive) {
       // Stop session
       setIsSessionActive(false);
+      
+      // Stop video recording
+      const videoBlob = await stopVideoRecording();
+      
+      // Save session
+      await saveSession(videoBlob);
+      
+      // Stop camera stream after session
+      stopCameraStream();
+      
       setSessionTime(0);
       setCurrentMetrics([]);
       lastValidMetricsRef.current = [];
-      // Stop camera
-      if (videoRef.current && videoRef.current.srcObject) {
-        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
-        tracks.forEach((track) => track.stop());
-      }
     } else {
       // Start session
+      if (!selectedActivity) return;
+      
       setIsSessionActive(true);
       setCurrentMetrics([]);
       setRealTimeFeedback([]);
       setCurrentBiomechanics(null);
       lastValidMetricsRef.current = [];
+      
       if (ruleEngineRef.current) {
         ruleEngineRef.current.reset();
       }
       smootherRef.current.reset();
+      
+      // Start session aggregator
+      sessionAggregatorRef.current.startSession(selectedActivity.category);
+      sessionStartTimeRef.current = Date.now();
+      
+      // Start video recording
+      startVideoRecording();
+    }
+  };
+
+  // Stop and release camera stream
+  const stopCameraStream = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => {
+        track.stop();
+        console.log(`🎥 Stopped ${track.kind} track`);
+      });
+      streamRef.current = null;
+    }
+    
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
   };
 
@@ -338,6 +522,8 @@ export default function LiveCoaching() {
     if (isSessionActive) {
       handleStartStop(); // Stop session first
     }
+    // Stop camera stream
+    stopCameraStream();
     setSelectedActivity(null);
   };
 
@@ -730,12 +916,46 @@ export default function LiveCoaching() {
                   size="lg"
                   onClick={handleStartStop}
                   className="min-w-[160px]"
+                  disabled={isSavingSession}
                 >
                   <Icons.Stop size="md" className="mr-2" />
-                  End Session
+                  {isSavingSession ? 'Saving...' : 'End Session'}
                 </Button>
               ) : null}
             </div>
+            
+            {/* Save Progress */}
+            {isSavingSession && saveProgress && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-4 p-3 bg-primary-500/10 border border-primary-500/30 rounded-lg"
+              >
+                <div className="flex items-center gap-3">
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  >
+                    <Icons.Activity size="sm" className="text-primary-400" />
+                  </motion.div>
+                  <p className="text-sm text-primary-300 font-medium">{saveProgress}</p>
+                </div>
+              </motion.div>
+            )}
+            
+            {/* Save Error */}
+            {saveError && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-4 p-3 bg-error-500/10 border border-error-500/30 rounded-lg"
+              >
+                <div className="flex items-center gap-3">
+                  <Icons.AlertTriangle size="sm" className="text-error-400" />
+                  <p className="text-sm text-error-300">{saveError}</p>
+                </div>
+              </motion.div>
+            )}
           </div>
         </div>
 

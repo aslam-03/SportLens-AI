@@ -7,6 +7,7 @@ import Home from './pages/Home';
 import LiveCoaching from './pages/LiveCoaching';
 import Sessions from './pages/SessionsPage';
 import SessionDetail from './pages/SessionDetailPage';
+import Gallery from './pages/GalleryPage';
 import Reports from './pages/ReportsPage';
 import Account from './pages/AccountPage';
 
@@ -55,6 +56,7 @@ function App() {
         <Route path="/coaching" element={<LiveCoaching />} />
         <Route path="/sessions" element={<Sessions />} />
         <Route path="/sessions/:id" element={<SessionDetail />} />
+        <Route path="/gallery" element={<Gallery />} />
         <Route path="/reports" element={<Reports />} />
         <Route path="/account" element={<Account />} />
         <Route path="*" element={<Navigate to="/" replace />} />
