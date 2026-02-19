@@ -26,10 +26,10 @@ interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, keyo
 }
 
 const variantStyles: Record<ButtonVariant, string> = {
-  primary: 'bg-primary-600 hover:bg-primary-700 active:bg-primary-800 text-white shadow-md hover:shadow-lg disabled:bg-primary-300',
-  secondary: 'bg-white dark:bg-navy-800 hover:bg-gray-50 dark:hover:bg-navy-700 text-gray-900 dark:text-gray-50 border-2 border-gray-300 dark:border-navy-600 disabled:bg-gray-100 dark:disabled:bg-navy-900',
-  ghost: 'bg-transparent hover:bg-gray-100 dark:hover:bg-navy-800 text-gray-700 dark:text-gray-300 disabled:bg-transparent',
-  danger: 'bg-error-600 hover:bg-error-700 active:bg-error-800 text-white shadow-md hover:shadow-lg disabled:bg-error-300',
+  primary: 'bg-primary-600 hover:bg-primary-500 active:bg-primary-700 text-white shadow-lg hover:shadow-xl hover:shadow-primary-900/30 disabled:bg-primary-300 transition-all duration-200',
+  secondary: 'bg-navy-800 hover:bg-navy-700 active:bg-navy-600 text-white border border-navy-600 hover:border-primary-500/50 disabled:bg-navy-900 transition-all duration-200',
+  ghost: 'bg-transparent hover:bg-navy-800/50 text-gray-400 hover:text-white disabled:bg-transparent transition-all duration-200',
+  danger: 'bg-error-600 hover:bg-error-500 active:bg-error-700 text-white shadow-lg hover:shadow-xl disabled:bg-error-300 transition-all duration-200',
 };
 
 const sizeStyles: Record<ButtonSize, string> = {
@@ -61,7 +61,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         className={cn(
           // Base styles
-          'inline-flex items-center justify-center gap-2',
+          'inline-flex items-center justify-center gap-2 flex-nowrap',
           'font-medium rounded-lg',
           'transition-all duration-200',
           'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500',

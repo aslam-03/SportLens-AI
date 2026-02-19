@@ -712,9 +712,8 @@ export default function LiveCoaching() {
                     variant="primary"
                     size="lg"
                     onClick={handleStartStop}
-                    className="min-w-[200px]"
+                    className="min-w-[200px] hover:scale-105 active:scale-95 transition-transform"
                   >
-                    <Icons.Play size="md" className="mr-2" />
                     Start Session
                   </Button>
                 </div>

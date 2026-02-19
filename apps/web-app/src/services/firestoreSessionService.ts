@@ -33,6 +33,7 @@ import {
   setDoc,
   getDoc,
   getDocs,
+  deleteDoc,
   query,
   where,
   orderBy,
@@ -306,4 +307,40 @@ export async function updateSessionR2Objects(
   await setDoc(sessionDocRef, { r2Objects }, { merge: true });
 
   console.log(`✅ R2 objects updated for session ${sessionId}:`, r2Objects);
+}
+
+/**
+ * Delete a session from Firestore
+ * Verifies that the session belongs to the authenticated user before deletion
+ * 
+ * @param uid - User ID
+ * @param sessionId - Session ID
+ * @returns Promise<void>
+ * @throws Error if user is not authenticated or session doesn't belong to user
+ */
+export async function deleteSessionFromFirestore(
+  uid: string,
+  sessionId: string
+): Promise<void> {
+  if (!uid) {
+    throw new Error('User must be authenticated to delete sessions');
+  }
+
+  const sessionDocRef = doc(db, 'sessions', sessionId);
+  
+  // Verify ownership before deletion
+  const sessionSnap = await getDoc(sessionDocRef);
+  if (!sessionSnap.exists()) {
+    throw new Error('Session not found');
+  }
+  
+  const data = sessionSnap.data() as FirestoreSession;
+  if (data.userId !== uid) {
+    throw new Error('Unauthorized: Session does not belong to user');
+  }
+  
+  // Delete the session document
+  await deleteDoc(sessionDocRef);
+
+  console.log(`✅ Session ${sessionId} deleted from Firestore for user ${uid}`);
 }
