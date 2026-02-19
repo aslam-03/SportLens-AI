@@ -23,6 +23,7 @@ const navItems: NavItem[] = [
   { id: 'live', label: 'Live Coaching', path: '/live', icon: 'Video' },
   { id: 'sessions', label: 'Sessions', path: '/sessions', icon: 'History' },
   { id: 'gallery', label: 'Gallery', path: '/gallery', icon: 'Camera' },
+  { id: 'chat', label: 'Chat', path: '/chat', icon: 'MessageCircle' },
   { id: 'account', label: 'Account', path: '/account', icon: 'User' },
 ];
 

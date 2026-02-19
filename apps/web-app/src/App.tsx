@@ -10,6 +10,7 @@ import SessionDetail from './pages/SessionDetailPage';
 import Gallery from './pages/GalleryPage';
 import Reports from './pages/ReportsPage';
 import Account from './pages/AccountPage';
+import Chat from './pages/ChatPage';
 
 function App() {
   const { user, loading, signOutUser } = useAuth();
@@ -58,6 +59,7 @@ function App() {
         <Route path="/sessions/:id" element={<SessionDetail />} />
         <Route path="/gallery" element={<Gallery />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/chat" element={<Chat />} />
         <Route path="/account" element={<Account />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

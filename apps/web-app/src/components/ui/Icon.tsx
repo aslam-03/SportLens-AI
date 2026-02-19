@@ -38,6 +38,7 @@ import {
   Share2,
   Eye,
   EyeOff,
+  MessageCircle,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
@@ -78,6 +79,7 @@ export const Icons = {
   User: createIcon(User),
   Settings: createIcon(Settings),
   LogOut: createIcon(LogOut),
+  MessageCircle: createIcon(MessageCircle),
   
   // Actions
   Camera: createIcon(Camera),
@@ -152,6 +154,7 @@ export {
   Share2,
   Eye,
   EyeOff,
+  MessageCircle,
 };
 
 // Default export for convenience

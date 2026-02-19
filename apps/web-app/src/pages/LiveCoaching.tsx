@@ -287,6 +287,9 @@ export default function LiveCoaching() {
                 // Start pose detection loop
                 console.log('Starting detection loop...');
                 startPoseDetectionLoop();
+                
+                // Start video recording once everything is ready
+                startVideoRecording();
               } catch (error) {
                 console.error('❌ Failed to initialize pose detection:', error);
                 setIsInitializing(false);
@@ -322,10 +325,14 @@ export default function LiveCoaching() {
         setPoseInitialized(false);
       }
       
-      // Stop camera
-      if (videoRef.current && videoRef.current.srcObject) {
+      // ⚠️ IMPORTANT: Only stop camera if NOT recording
+      // During recording, we need the stream alive for MediaRecorder
+      if (!isSessionActive && videoRef.current && videoRef.current.srcObject) {
+        console.log('Stopping camera (session not active)');
         const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
         tracks.forEach((track) => track.stop());
+      } else if (isSessionActive) {
+        console.log('🔐 Keeping camera alive - session in progress');
       }
     };
   }, [isSessionActive]);
@@ -338,14 +345,25 @@ export default function LiveCoaching() {
 
   // Start video recording
   const startVideoRecording = () => {
-    const stream = videoRef.current?.srcObject as MediaStream;
+    // videoRef is most reliable source since it's set to srcObject during camera init
+    const videoStream = videoRef.current?.srcObject as MediaStream | null;
+    const referenceStream = streamRef.current;
+    const stream = videoStream || referenceStream;
+    
+    console.log('[VideoRecording] Starting video recording...');
+    console.log('[VideoRecording] videoRef stream:', !!videoStream, videoStream?.getTracks().length || 0, 'tracks');
+    console.log('[VideoRecording] streamRef backup:', !!referenceStream);
+    console.log('[VideoRecording] Using:', videoStream ? 'videoRef' : referenceStream ? 'streamRef' : 'NONE');
+    
     if (!stream) {
-      console.warn('[VideoRecording] No stream available');
+      console.error('[VideoRecording] ❌ No stream available - cannot record');
       return;
     }
 
     try {
       recordedChunksRef.current = [];
+      console.log('[VideoRecording] Cleared recorded chunks');
+      
       const options = {
         mimeType: 'video/webm;codecs=vp9',
         videoBitsPerSecond: 2500000,
@@ -353,21 +371,29 @@ export default function LiveCoaching() {
 
       if (!MediaRecorder.isTypeSupported(options.mimeType)) {
         options.mimeType = 'video/webm';
+        console.log('[VideoRecording] VP9 not supported, using fallback');
       }
 
       const mediaRecorder = new MediaRecorder(stream, options);
+      
       mediaRecorder.ondataavailable = (event) => {
+        console.log('[VideoRecording] 📦 Data chunk arrived:', (event.data.size / 1024).toFixed(1), 'KB');
         if (event.data && event.data.size > 0) {
           recordedChunksRef.current.push(event.data);
+          console.log('[VideoRecording] Chunk #' + recordedChunksRef.current.length + ' stored');
         }
+      };
+      
+      mediaRecorder.onerror = (event) => {
+        console.error('[VideoRecording] ❌ Error:', event.error);
       };
 
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start(1000);
       setIsRecording(true);
-      console.log('🎥 Video recording started');
+      console.log('🎥 Recording started at', new Date().toLocaleTimeString());
     } catch (error) {
-      console.error('Failed to start video recording:', error);
+      console.error('❌ Failed to start:', error);
     }
   };
 
@@ -376,19 +402,29 @@ export default function LiveCoaching() {
     return new Promise((resolve) => {
       const mediaRecorder = mediaRecorderRef.current;
       
+      console.log('[VideoRecording] Stop requested...');
+      console.log('[VideoRecording] Chunks collected:', recordedChunksRef.current.length);
+      console.log('[VideoRecording] Recorder state:', mediaRecorder?.state);
+      
       if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        console.warn('[VideoRecording] ⚠️ Recorder not active');
         resolve(null);
         return;
       }
 
       mediaRecorder.onstop = () => {
+        console.log('[VideoRecording] ⏹️  Recorder stopped');
+        console.log('[VideoRecording] Total chunks:', recordedChunksRef.current.length);
+        
         if (recordedChunksRef.current.length === 0) {
+          console.warn('❌ NO CHUNKS RECORDED - recording may have failed');
           resolve(null);
           return;
         }
+        
         const videoBlob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
         setIsRecording(false);
-        console.log(`🎥 Video recorded: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
+        console.log(`✅ Video blob created: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
         resolve(videoBlob);
       };
 
@@ -400,22 +436,25 @@ export default function LiveCoaching() {
   const saveSession = async (videoBlob: Blob | null) => {
     const completedSession = sessionAggregatorRef.current.stopSession();
     if (!completedSession || !user?.uid) {
-      console.warn('No session to save or user not authenticated');
+      console.warn('⚠️ No session to save or user not authenticated');
+      setSaveError('Session not ready or user not authenticated');
       return;
     }
 
     setIsSavingSession(true);
     setSaveError(null);
-    setSaveProgress('Saving session...');
+    setSaveProgress('Saving session to Firestore...');
 
     try {
-      // Save to Firestore
+      // Step 1: Save to Firestore
+      console.log('📝 Saving session:', completedSession.sessionId);
       await saveSessionToFirestore(user.uid, completedSession);
       console.log('✅ Session saved to Firestore');
 
-      // Upload to R2 if video available
-      if (videoBlob) {
-        setSaveProgress('Uploading video...');
+      // Step 2: Upload to R2 if video available
+      if (videoBlob && videoBlob.size > 0) {
+        console.log(`📹 Video blob size: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
+        setSaveProgress('Uploading session data to R2...');
         
         const sessionData = {
           sessionId: completedSession.sessionId,
@@ -426,33 +465,51 @@ export default function LiveCoaching() {
           metrics: completedSession.metrics,
         };
 
-        const sessionDataUrl = await uploadKeypointsToR2(
-          completedSession.sessionId,
-          [sessionData]
-        );
+        try {
+          console.log('📤 Starting R2 session data upload...');
+          const sessionDataUrl = await uploadKeypointsToR2(
+            completedSession.sessionId,
+            [sessionData]
+          );
+          console.log('✅ Session data uploaded:', sessionDataUrl);
 
-        const videoUrl = await uploadVideoToR2(
-          completedSession.sessionId,
-          videoBlob,
-          'session.webm'
-        );
+          setSaveProgress('Uploading video to R2...');
+          console.log('📹 Starting video upload to R2...');
+          const videoUrl = await uploadVideoToR2(
+            completedSession.sessionId,
+            videoBlob,
+            'session.webm'
+          );
+          console.log('✅ Video uploaded:', videoUrl);
 
-        await updateSessionR2Objects(user.uid, completedSession.sessionId, {
-          sessionDataUrl,
-          videoUrl,
-        });
+          setSaveProgress('Linking R2 URLs to session...');
+          console.log('🔗 Updating Firestore with R2 URLs...');
+          await updateSessionR2Objects(user.uid, completedSession.sessionId, {
+            sessionDataUrl,
+            videoUrl,
+          });
+          console.log('✅ R2 URLs linked to session');
 
-        console.log('✅ Video uploaded to R2');
+        } catch (r2Error) {
+          console.error('❌ R2 upload error:', r2Error);
+          setSaveError(`R2 upload failed: ${r2Error instanceof Error ? r2Error.message : 'Unknown error'}`);
+          throw r2Error;
+        }
+      } else {
+        console.warn('⚠️ No video blob to upload - session saved to Firestore only');
+        setSaveProgress('⚠️ Note: No video recorded for this session');
       }
 
-      setSaveProgress('Session saved successfully!');
+      setSaveProgress('Session saved successfully! ✅');
       setTimeout(() => {
         setSaveProgress('');
         navigate('/sessions');
       }, 2000);
     } catch (error) {
       console.error('❌ Error saving session:', error);
-      setSaveError(error instanceof Error ? error.message : 'Failed to save session');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to save session';
+      setSaveError(errorMessage);
+      setSaveProgress('');
     } finally {
       setIsSavingSession(false);
     }
@@ -495,7 +552,7 @@ export default function LiveCoaching() {
       sessionStartTimeRef.current = Date.now();
       
       // Start video recording
-      startVideoRecording();
+      // Video recording will be started in accessCamera once the stream is ready
     }
   };
 
@@ -948,12 +1005,21 @@ export default function LiveCoaching() {
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-4 p-3 bg-error-500/10 border border-error-500/30 rounded-lg"
+                className="mt-4 p-3 bg-error-500/10 border border-error-500/30 rounded-lg flex items-start justify-between gap-3"
               >
-                <div className="flex items-center gap-3">
-                  <Icons.AlertTriangle size="sm" className="text-error-400" />
-                  <p className="text-sm text-error-300">{saveError}</p>
+                <div className="flex items-start gap-3 flex-1">
+                  <Icons.AlertTriangle size="sm" className="text-error-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm text-error-300 font-medium">Error Saving Session</p>
+                    <p className="text-xs text-error-200 mt-1">{saveError}</p>
+                  </div>
                 </div>
+                <button
+                  onClick={() => setSaveError(null)}
+                  className="flex-shrink-0 text-error-400 hover:text-error-300"
+                >
+                  <Icons.X size="sm" />
+                </button>
               </motion.div>
             )}
           </div>

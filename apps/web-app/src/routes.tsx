@@ -47,6 +47,13 @@ export const routes = [
         icon: 'Settings',
       },
       {
+        path: '/chat',
+        element: lazy(() => import('./pages/ChatPage')),
+        label: 'Chat',
+        showInNav: true,
+        icon: 'MessageCircle',
+      },
+      {
         path: '/account',
         element: <AccountPage />,
         label: 'Account',

@@ -20,6 +20,7 @@ const navItems: NavItem[] = [
   { id: 'home', label: 'Home', path: '/', icon: 'Home' },
   { id: 'live', label: 'Live', path: '/live', icon: 'Video' },
   { id: 'sessions', label: 'Sessions', path: '/sessions', icon: 'History' },
+  { id: 'chat', label: 'Chat', path: '/chat', icon: 'MessageCircle' },
   { id: 'account', label: 'Account', path: '/account', icon: 'User' },
 ];
 

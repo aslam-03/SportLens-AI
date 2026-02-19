@@ -12,6 +12,9 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import firebase_admin
 from firebase_admin import credentials, auth
 from functools import lru_cache
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +43,21 @@ def initialize_firebase():
             firebase_admin.initialize_app(cred)
             logger.info(f"✅ Firebase Admin initialized with service account: {cred_path}")
         else:
-            # Try to use default credentials (for deployed environments)
-            firebase_admin.initialize_app()
-            logger.info("✅ Firebase Admin initialized with default credentials")
+            # For development without service account key:
+            # Firebase can verify ID tokens with just the project ID
+            project_id = os.getenv("FIREBASE_PROJECT_ID", "sportlensai")
+            
+            logger.info(f"ℹ️ No service account key - using project ID: {project_id}")
+            logger.info("ℹ️ Token verification will work without credentials")
+            
+            # Initialize with just project ID - this is enough for token verification
+            firebase_admin.initialize_app(options={"projectId": project_id})
+            
+            logger.info("✅ Firebase Admin initialized (token verification only mode)")
             
     except Exception as e:
-        logger.warning(f"⚠️ Firebase Admin initialization failed: {e}")
-        logger.warning("⚠️ Authentication will be disabled")
+        logger.error(f"❌ Firebase Admin initialization failed: {e}")
+        raise RuntimeError(f"Firebase initialization failed: {e}")
 
 
 async def verify_firebase_token(
@@ -64,6 +75,36 @@ async def verify_firebase_token(
     Raises:
         HTTPException: If token is invalid or missing
     """
+    # DEVELOPMENT MODE - Skip auth verification
+    dev_mode = os.getenv("DEV_MODE_SKIP_AUTH", "false").lower() == "true"
+    
+    if dev_mode:
+        logger.warning("⚠️  DEV MODE: Skipping Firebase token verification")
+        # Extract user info from token without verification (UNSAFE - dev only)
+        if not credentials:
+            # Return a mock user for development
+            return {
+                "uid": "dev_user_123",
+                "email": "dev@example.com",
+                "email_verified": True
+            }
+        
+        try:
+            import jwt
+            # Decode without verification (DEVELOPMENT ONLY!)
+            token = credentials.credentials
+            decoded = jwt.decode(token, options={"verify_signature": False})
+            logger.warning(f"⚠️  DEV MODE: Using unverified token for user: {decoded.get('email', 'unknown')}")
+            return decoded
+        except Exception as e:
+            logger.warning(f"⚠️  DEV MODE: Could not decode token, using mock user: {e}")
+            return {
+                "uid": "dev_user_123",
+                "email": "dev@example.com",
+                "email_verified": True
+            }
+    
+    # PRODUCTION MODE - Verify token properly
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -97,9 +138,10 @@ async def verify_firebase_token(
         )
     except Exception as e:
         logger.error(f"❌ Token verification failed: {e}")
+        # Include the specific error in the response detail for debugging
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
+            detail=f"Authentication failed: {str(e)}"
         )
 
 

@@ -12,7 +12,7 @@
 
 import { auth } from '../firebase';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+const BACKEND_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 /**
  * Error class for R2 upload failures
@@ -42,31 +42,64 @@ async function requestPresignedUrl(
     throw new R2UploadError('User must be authenticated to upload files', 'AUTH_REQUIRED');
   }
 
+  console.log(`[R2Upload] Requesting presigned URL for: ${fileName}`);
+  console.log(`[R2Upload] Backend URL: ${BACKEND_URL}`);
+
   // Get Firebase ID token
-  const idToken = await user.getIdToken();
-
-  const response = await fetch(`${BACKEND_URL}/upload/generateUploadUrl`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${idToken}`,
-    },
-    body: JSON.stringify({
-      sessionId,
-      fileName,
-      contentType,
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new R2UploadError(
-      error.detail || `Failed to generate upload URL: ${response.statusText}`,
-      'PRESIGNED_URL_FAILED'
-    );
+  let idToken: string;
+  try {
+    idToken = await user.getIdToken();
+    console.log('[R2Upload] Firebase token obtained');
+  } catch (tokenError) {
+    console.error('[R2Upload] Failed to get Firebase token:', tokenError);
+    throw new R2UploadError('Failed to authenticate with Firebase', 'TOKEN_ERROR');
   }
 
-  return response.json();
+  try {
+    const response = await fetch(`${BACKEND_URL}/upload/generateUploadUrl`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        sessionId,
+        fileName,
+        contentType,
+      }),
+    });
+
+    console.log(`[R2Upload] Backend response status: ${response.status}`);
+
+    if (!response.ok) {
+      let errorDetail = response.statusText;
+      try {
+        const errorData = await response.json();
+        errorDetail = errorData.detail || errorData.message || response.statusText;
+        console.error('[R2Upload] Backend error response:', errorData);
+      } catch (parseError) {
+        console.error('[R2Upload] Could not parse error response');
+      }
+
+      throw new R2UploadError(
+        `Backend error: ${errorDetail}`,
+        'PRESIGNED_URL_FAILED'
+      );
+    }
+
+    const data = await response.json();
+    console.log('[R2Upload] ✅ Presigned URL received:', data.objectKey);
+    return data;
+  } catch (fetchError) {
+    if (fetchError instanceof R2UploadError) {
+      throw fetchError;
+    }
+    console.error('[R2Upload] Fetch error:', fetchError);
+    throw new R2UploadError(
+      fetchError instanceof Error ? fetchError.message : 'Network error requesting presigned URL',
+      'NETWORK_ERROR'
+    );
+  }
 }
 
 /**
@@ -77,17 +110,35 @@ async function uploadToR2(
   file: Blob,
   contentType: string
 ): Promise<void> {
-  const response = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': contentType,
-    },
-    body: file,
-  });
+  console.log(`[R2Upload] Starting file upload - Size: ${(file.size / 1024 / 1024).toFixed(2)} MB, Type: ${contentType}`);
+  
+  try {
+    const response = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': contentType,
+      },
+      body: file,
+    });
 
-  if (!response.ok) {
+    console.log(`[R2Upload] R2 upload response status: ${response.status}`);
+
+    if (!response.ok) {
+      console.error(`[R2Upload] R2 upload failed: ${response.statusText}`);
+      throw new R2UploadError(
+        `R2 upload failed: ${response.statusText}`,
+        'UPLOAD_FAILED'
+      );
+    }
+
+    console.log('[R2Upload] ✅ File uploaded to R2 successfully');
+  } catch (error) {
+    console.error('[R2Upload] Upload error:', error);
+    if (error instanceof R2UploadError) {
+      throw error;
+    }
     throw new R2UploadError(
-      `Failed to upload to R2: ${response.statusText}`,
+      error instanceof Error ? error.message : 'Unknown upload error',
       'UPLOAD_FAILED'
     );
   }
