@@ -34,12 +34,16 @@ function App() {
     return (
       <div className="min-h-screen bg-gradient-to-b from-navy-950 via-navy-900 to-navy-950 flex items-center justify-center px-4">
         <div className="text-center max-w-md">
-          <h1 className="text-4xl font-bold text-text-primary mb-2">
-            SportLens AI
-          </h1>
-          <p className="text-text-secondary mb-8">
-            Professional pose analysis and coaching platform
-          </p>
+          {/* App Logo/Branding */}
+          <div className="mb-8">
+            <h1 className="text-5xl font-bold bg-gradient-to-r from-primary-400 via-cyan-400 to-primary-500 bg-clip-text text-transparent mb-3">
+              SportLens AI
+            </h1>
+            <p className="text-gray-300 text-base font-medium">
+              Professional pose analysis and coaching platform
+            </p>
+          </div>
+          
           <AuthPanel
             title="Welcome back"
             subtitle="Sign in to access your coaching sessions"
