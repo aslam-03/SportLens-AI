@@ -50,6 +50,7 @@ function App() {
     <Router>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/live" element={<LiveCoaching />} />
         <Route path="/coaching" element={<LiveCoaching />} />
         <Route path="/sessions" element={<Sessions />} />
         <Route path="/reports" element={<Reports />} />

@@ -8,6 +8,66 @@ import { Icons } from '@/components/ui/Icon';
 import { Badge } from '@/components/ui/Badge';
 import { motion, AnimatePresence } from 'framer-motion';
 
+interface Activity {
+  id: string;
+  name: string;
+  category: 'cricket' | 'fitness';
+  icon: 'Activity' | 'TrendingUp' | 'BarChart';
+  description: string;
+  metrics: string[];
+}
+
+const activities: Activity[] = [
+  {
+    id: 'batting-stance',
+    name: 'Batting Stance',
+    category: 'cricket',
+    icon: 'Activity',
+    description: 'Analyze batting posture and balance',
+    metrics: ['Stance Width', 'Balance', 'Knee Angle', 'Shoulder Alignment']
+  },
+  {
+    id: 'bowling-action',
+    name: 'Bowling Action',
+    category: 'cricket',
+    icon: 'TrendingUp',
+    description: 'Track bowling form and release',
+    metrics: ['Arm Angle', 'Follow Through', 'Hip Rotation', 'Release Point']
+  },
+  {
+    id: 'fielding-position',
+    name: 'Fielding Position',
+    category: 'cricket',
+    icon: 'Activity',
+    description: 'Optimize fielding stance',
+    metrics: ['Ready Position', 'Weight Distribution', 'Reaction Time', 'Balance']
+  },
+  {
+    id: 'squat-form',
+    name: 'Squat Form',
+    category: 'fitness',
+    icon: 'BarChart',
+    description: 'Perfect your squat technique',
+    metrics: ['Knee Alignment', 'Hip Depth', 'Back Angle', 'Balance']
+  },
+  {
+    id: 'plank-hold',
+    name: 'Plank Hold',
+    category: 'fitness',
+    icon: 'Activity',
+    description: 'Core stability analysis',
+    metrics: ['Hip Alignment', 'Shoulder Position', 'Core Engagement', 'Time']
+  },
+  {
+    id: 'lunge-form',
+    name: 'Lunge Form',
+    category: 'fitness',
+    icon: 'TrendingUp',
+    description: 'Lower body strength and balance',
+    metrics: ['Knee Angle', 'Hip Alignment', 'Balance', 'Depth']
+  }
+];
+
 interface Metric {
   label: string;
   value: number;
@@ -28,10 +88,12 @@ export default function LiveCoaching() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [sessionTime, setSessionTime] = useState(0);
   const [feedbackVisible, setFeedbackVisible] = useState(true);
+  const [currentMetrics, setCurrentMetrics] = useState<Metric[]>([]);
 
   const currentUser: User = {
     name: user?.displayName || user?.email?.split('@')[0] || 'User',
@@ -139,9 +201,63 @@ export default function LiveCoaching() {
   };
 
   const handleStartStop = () => {
-    setIsSessionActive(!isSessionActive);
-    setSessionTime(0);
+    if (isSessionActive) {
+      // Stop session
+      setIsSessionActive(false);
+      setSessionTime(0);
+      setCurrentMetrics([]);
+      // Stop camera
+      if (videoRef.current && videoRef.current.srcObject) {
+        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+        tracks.forEach((track) => track.stop());
+      }
+    } else {
+      // Start session
+      setIsSessionActive(true);
+      // Initialize metrics based on selected activity
+      if (selectedActivity) {
+        const initialMetrics: Metric[] = selectedActivity.metrics.map((label, index) => ({
+          label,
+          value: Math.floor(Math.random() * 30) + 70, // Random 70-100
+          unit: '%',
+          status: 'good' as const
+        }));
+        setCurrentMetrics(initialMetrics);
+      }
+    }
   };
+
+  const handleSelectActivity = (activity: Activity) => {
+    setSelectedActivity(activity);
+  };
+
+  const handleBackToActivities = () => {
+    if (isSessionActive) {
+      handleStartStop(); // Stop session first
+    }
+    setSelectedActivity(null);
+  };
+
+  // Update metrics in real-time during session
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isSessionActive && selectedActivity) {
+      interval = setInterval(() => {
+        setCurrentMetrics(prev => 
+          prev.map(metric => {
+            const change = Math.floor(Math.random() * 10) - 5; // -5 to +5
+            const newValue = Math.max(0, Math.min(100, metric.value + change));
+            let status: 'good' | 'warning' | 'critical' = 'good';
+            if (newValue < 60) status = 'critical';
+            else if (newValue < 75) status = 'warning';
+            
+            return { ...metric, value: newValue, status };
+          })
+        );
+      }, 2000); // Update every 2 seconds
+    }
+    return () => clearInterval(interval);
+  }, [isSessionActive, selectedActivity]);
 
   const handleCaptureFrame = () => {
     if (canvasRef.current && videoRef.current) {
@@ -195,14 +311,30 @@ export default function LiveCoaching() {
     }
   };
 
-  return (
-    <AppShell
-      currentUser={currentUser}
-      onLogout={handleLogout}
-    >
-      <div className="w-full h-full flex flex-col lg:flex-row overflow-hidden">
+  // Render fullscreen when activity is selected (no AppShell)
+  if (selectedActivity) {
+    return (
+      <div className="fixed inset-0 w-full h-full flex flex-col lg:flex-row overflow-hidden bg-black">
         {/* Camera Section */}
         <div className="flex-1 flex flex-col bg-black relative min-h-0">
+          {/* Header with Back Button */}
+          <div className="flex-shrink-0 bg-navy-900 border-b border-navy-800 px-4 py-3">
+            <div className="flex items-center justify-between">
+              <button
+                onClick={handleBackToActivities}
+                className="flex items-center gap-2 text-gray-300 hover:text-white transition-colors"
+              >
+                <Icons.ChevronLeft size="md" />
+                <span className="text-sm font-medium">Back to Activities</span>
+              </button>
+              <div className="text-center">
+                <p className="text-white font-semibold">{selectedActivity.name}</p>
+                <p className="text-xs text-gray-400">{selectedActivity.category === 'cricket' ? 'Cricket' : 'Fitness'}</p>
+              </div>
+              <div className="w-24"></div> {/* Spacer for centering */}
+            </div>
+          </div>
+
           {/* Video/Camera Area */}
           <div className="flex-1 flex items-center justify-center bg-black relative overflow-hidden">
             {isSessionActive ? (
@@ -239,7 +371,7 @@ export default function LiveCoaching() {
                 {/* Floating Metrics (Mobile) */}
                 <div className="absolute bottom-4 left-4 right-4 lg:hidden z-10">
                   <div className="grid grid-cols-4 gap-2">
-                    {metrics.map((metric) => (
+                    {currentMetrics.map((metric) => (
                       <div
                         key={metric.label}
                         className="bg-navy-900/80 backdrop-blur rounded-lg p-2 text-center border border-navy-700"
@@ -254,184 +386,271 @@ export default function LiveCoaching() {
                 </div>
               </>
             ) : (
-              <div className="flex flex-col items-center justify-center gap-4 p-6">
-                <Icons.Camera size="xl" className="text-text-muted" />
-                <div className="text-center">
-                  <h3 className="text-xl font-semibold text-text-primary mb-2">
-                    Camera Ready
-                  </h3>
-                  <p className="text-text-secondary text-sm max-w-xs">
-                    Position yourself in front of the camera and tap Start to begin your session.
-                  </p>
+              <div className="flex flex-col items-center justify-center gap-6 p-6">
+                <div className="p-6 bg-primary-600/10 rounded-full">
+                  <Icons.Camera size="xl" className="text-primary-400" />
                 </div>
-                <Button
-                  variant="primary"
-                  onClick={handleStartStop}
-                  className="mt-4"
-                >
-                  <Icons.Play size="sm" className="mr-2" />
-                  Start Session
-                </Button>
+                <div className="text-center max-w-md">
+                  <h3 className="text-2xl font-semibold text-white mb-3">
+                    Ready to Start
+                  </h3>
+                  <p className="text-gray-300 text-sm mb-6">
+                    Click Start Session to begin tracking your {selectedActivity.name.toLowerCase()}.
+                    Make sure you're in a well-lit area with your full body visible.
+                  </p>
+                  <div className="flex flex-wrap gap-2 justify-center mb-6">
+                    {selectedActivity.metrics.map((metric, idx) => (
+                      <Badge key={idx} variant="default" size="sm">
+                        {metric}
+                      </Badge>
+                    ))}
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    onClick={handleStartStop}
+                    className="min-w-[200px]"
+                  >
+                    <Icons.Play size="md" className="mr-2" />
+                    Start Session
+                  </Button>
+                </div>
               </div>
             )}
           </div>
 
-          {/* Desktop Metrics Bar */}
-          {isSessionActive && (
-            <div className="hidden lg:grid grid-cols-4 gap-4 p-4 border-t border-navy-700 bg-navy-900">
-              {metrics.map((metric) => (
-                <div key={metric.label} className={`p-3 rounded-lg ${getStatusBg(metric.status)}`}>
-                  <p className="text-text-muted text-xs font-medium mb-1">{metric.label}</p>
-                  <p className={`text-2xl font-bold ${getStatusColor(metric.status)}`}>
-                    {metric.value}
-                    <span className="text-sm ml-1">{metric.unit}</span>
-                  </p>
-                </div>
-              ))}
+          {/* Control Bar */}
+          <div className="flex-shrink-0 bg-navy-900 border-t border-navy-800 p-4">
+            <div className="flex items-center justify-center gap-4">
+              {isSessionActive ? (
+                <>
+                  <Button
+                    variant="danger"
+                    size="lg"
+                    onClick={handleStartStop}
+                    className="min-w-[160px]"
+                  >
+                    <Icons.Stop size="md" className="mr-2" />
+                    End Session
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    onClick={handleCaptureFrame}
+                  >
+                    <Icons.Camera size="md" className="mr-2" />
+                    Capture
+                  </Button>
+                </>
+              ) : null}
             </div>
-          )}
+          </div>
         </div>
 
-        {/* Feedback Panel - Desktop */}
-        {isSessionActive && (
-          <motion.div
-            className="hidden lg:flex flex-col w-80 border-l border-navy-700 bg-navy-900 overflow-hidden"
-            initial={{ x: 320 }}
-            animate={{ x: 0 }}
-            exit={{ x: 320 }}
-            transition={{ duration: 0.3 }}
-          >
-            {/* Panel Header */}
-            <div className="p-4 border-b border-navy-700">
-              <h3 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-                <Icons.Info size="sm" className="text-primary-500" />
-                Real-time Feedback
-              </h3>
-            </div>
+        {/* Desktop Metrics Sidebar */}
+        <div className="hidden lg:flex lg:w-80 xl:w-96 bg-navy-900 border-l border-navy-800 flex-col overflow-hidden">
+          {/* Metrics Header */}
+          <div className="flex-shrink-0 p-6 border-b border-navy-800">
+            <h2 className="text-xl font-semibold text-white mb-2">Live Metrics</h2>
+            <p className="text-sm text-gray-400">Real-time biomechanics tracking</p>
+          </div>
 
-            {/* Feedback List */}
-            <div className="flex-1 overflow-y-auto">
-              <div className="p-4 space-y-3">
-                {realTimeFeedback.map((feedback) => (
-                  <motion.div
-                    key={feedback.id}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className={`p-3 rounded-lg border ${
-                      feedback.type === 'success'
-                        ? 'bg-success-500/10 border-success-500/30'
-                        : feedback.type === 'warning'
-                          ? 'bg-warning-500/10 border-warning-500/30'
-                          : 'bg-primary-500/10 border-primary-500/30'
-                    }`}
+          {/* Metrics List */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {currentMetrics.map((metric) => (
+              <motion.div
+                key={metric.label}
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className={`p-4 rounded-lg border ${
+                  metric.status === 'good'
+                    ? 'border-success-500/30 bg-success-500/5'
+                    : metric.status === 'warning'
+                    ? 'border-warning-500/30 bg-warning-500/5'
+                    : 'border-danger-500/30 bg-danger-500/5'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-gray-300 font-medium">{metric.label}</p>
+                  <Badge
+                    variant={
+                      metric.status === 'good'
+                        ? 'success'
+                        : metric.status === 'warning'
+                        ? 'warning'
+                        : 'default'
+                    }
+                    size="sm"
+                    className={metric.status === 'critical' ? 'bg-danger-500/20 text-danger-500 border-danger-500/30' : ''}
                   >
-                    <div className="flex items-start gap-2">
-                      {feedback.type === 'success' ? (
-                        <Icons.Check
-                          size="sm"
-                          className="text-success-500"
-                        />
-                      ) : feedback.type === 'warning' ? (
-                        <Icons.AlertTriangle
-                          size="sm"
-                          className="text-warning-500"
-                        />
-                      ) : (
-                        <Icons.Info
-                          size="sm"
-                          className="text-primary-500"
-                        />
-                      )}
-                      <div className="flex-1">
-                        <p className="text-sm text-text-primary">{feedback.message}</p>
-                        <p className="text-xs text-text-muted mt-1">{feedback.timestamp}</p>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-            </div>
+                    {metric.status || 'N/A'}
+                  </Badge>
+                </div>
+                <p className={`text-3xl font-bold ${getStatusColor(metric.status)}`}>
+                  {metric.value}
+                </p>
+              </motion.div>
+            ))}
+          </div>
 
-            {/* Session Summary */}
-            <div className="p-4 border-t border-navy-700 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-text-secondary text-sm">Session Time</span>
-                <span className="text-text-primary font-semibold">{formatTime(sessionTime)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-text-secondary text-sm">Avg Score</span>
-                <span className="text-text-primary font-semibold">88%</span>
-              </div>
-              <Button variant="ghost" size="sm" className="w-full">
-                View Details
-              </Button>
-            </div>
-          </motion.div>
-        )}
-
-        {/* Mobile Feedback Panel - Collapsible */}
-        <AnimatePresence>
-          {isPanelOpen && isSessionActive && (
-            <motion.div
-              className="lg:hidden fixed inset-x-0 bottom-24 h-1/2 bg-navy-900 border-t border-navy-700 z-40 flex flex-col"
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%' }}
-              transition={{ duration: 0.3 }}
-            >
-              {/* Handle */}
-              <div className="flex justify-center pt-2 pb-4">
-                <div className="w-10 h-1 rounded-full bg-navy-700" />
-              </div>
-
-              {/* Content */}
-              <div className="flex-1 overflow-y-auto px-4 pb-4">
-                <h3 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-                  <Icons.Info size="sm" className="text-primary-500" />
-                  Feedback
-                </h3>
-                <div className="space-y-3">
-                  {realTimeFeedback.map((feedback) => (
-                    <div
-                      key={feedback.id}
-                      className={`p-3 rounded-lg border ${
-                        feedback.type === 'success'
-                          ? 'bg-success-500/10 border-success-500/30'
-                          : feedback.type === 'warning'
-                            ? 'bg-warning-500/10 border-warning-500/30'
-                            : 'bg-primary-500/10 border-primary-500/30'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2">
-                        {feedback.type === 'success' ? (
-                          <Icons.Check
-                            size="sm"
-                            className="text-success-500"
-                          />
-                        ) : feedback.type === 'warning' ? (
-                          <Icons.AlertTriangle
-                            size="sm"
-                            className="text-warning-500"
-                          />
-                        ) : (
-                          <Icons.Info
-                            size="sm"
-                            className="text-primary-500"
-                          />
-                        )}
-                        <div className="flex-1">
-                          <p className="text-sm text-text-primary">{feedback.message}</p>
-                          <p className="text-xs text-text-muted mt-1">{feedback.timestamp}</p>
+          {/* Feedback Panel (if active) */}
+          <AnimatePresence>
+            {isSessionActive && realTimeFeedback.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 20 }}
+                className="flex-shrink-0 border-t border-navy-800 bg-navy-950"
+              >
+                <div className="p-6">
+                  <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                    <Icons.Info size="md" />
+                    AI Feedback
+                  </h3>
+                  <div className="space-y-3 max-h-48 overflow-y-auto">
+                    {realTimeFeedback.map((feedback) => (
+                      <div
+                        key={feedback.id}
+                        className={`p-3 rounded-lg ${getStatusBg(feedback.type)}`}
+                      >
+                        <div className="flex items-start gap-2">
+                          {feedback.type === 'success' ? (
+                            <Icons.Check
+                              size="sm"
+                              className="text-success-500"
+                            />
+                          ) : feedback.type === 'warning' ? (
+                            <Icons.AlertTriangle
+                              size="sm"
+                              className="text-warning-500"
+                            />
+                          ) : (
+                            <Icons.Info
+                              size="sm"
+                              className="text-primary-500"
+                            />
+                          )}
+                          <div className="flex-1">
+                            <p className="text-sm text-text-primary">{feedback.message}</p>
+                            <p className="text-xs text-text-muted mt-1">{feedback.timestamp}</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    );
+  }
+
+  // Render with AppShell for activity selection
+  return (
+    <AppShell
+      currentUser={currentUser}
+      onLogout={handleLogout}
+    >
+      {/* Activity Selection Screen */}
+      <div className="min-h-screen bg-primary-700 py-8 px-4">
+          <div className="max-w-5xl mx-auto">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-8"
+            >
+              <h1 className="text-3xl font-bold text-white mb-2">Select Activity</h1>
+              <p className="text-gray-300">Choose what you'd like to practice today</p>
+            </motion.div>
+
+            {/* Cricket Activities */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="mb-8"
+            >
+              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                <Icons.Activity size="lg" />
+                Cricket Practice
+              </h2>
+              <div className="grid md:grid-cols-3 gap-4">
+                {activities.filter(a => a.category === 'cricket').map((activity) => {
+                  const IconComponent = Icons[activity.icon];
+                  return (
+                    <Card
+                      key={activity.id}
+                      className="p-6 cursor-pointer hover:border-primary-400 transition-all !bg-navy-800 border border-navy-700"
+                      onClick={() => handleSelectActivity(activity)}
+                      hoverable
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className="p-3 bg-primary-500/10 rounded-lg">
+                          <IconComponent size="lg" className="text-primary-400" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-white mb-2">{activity.name}</h3>
+                          <p className="text-sm text-gray-400 mb-3">{activity.description}</p>
+                          <div className="flex flex-wrap gap-1">
+                            {activity.metrics.slice(0, 3).map((metric, idx) => (
+                              <Badge key={idx} variant="default" size="sm" className="text-xs">
+                                {metric}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
               </div>
             </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+
+            {/* Fitness Activities */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+            >
+              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
+                <Icons.TrendingUp size="lg" />
+                Fitness Training
+              </h2>
+              <div className="grid md:grid-cols-3 gap-4">
+                {activities.filter(a => a.category === 'fitness').map((activity) => {
+                  const IconComponent = Icons[activity.icon];
+                  return (
+                    <Card
+                      key={activity.id}
+                      className="p-6 cursor-pointer hover:border-primary-400 transition-all !bg-navy-800 border border-navy-700"
+                      onClick={() => handleSelectActivity(activity)}
+                      hoverable
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className="p-3 bg-primary-500/10 rounded-lg">
+                          <IconComponent size="lg" className="text-primary-400" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="text-lg font-semibold text-white mb-2">{activity.name}</h3>
+                          <p className="text-sm text-gray-400 mb-3">{activity.description}</p>
+                          <div className="flex flex-wrap gap-1">
+                            {activity.metrics.slice(0, 3).map((metric, idx) => (
+                              <Badge key={idx} variant="default" size="sm" className="text-xs">
+                                {metric}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </div>
+        </div>
     </AppShell>
   );
 }
