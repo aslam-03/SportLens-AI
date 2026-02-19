@@ -6,7 +6,7 @@
 
 export { Button } from './Button';
 export { Card, CardHeader, CardTitle, CardContent, CardFooter } from './Card';
-export { Icon, Icons } from './Icon';
+export { Icons } from './Icon';
 export { Badge } from './Badge';
 export { Modal, ModalFooter } from './Modal';
 export { ToastProvider, useToast } from './Toast';

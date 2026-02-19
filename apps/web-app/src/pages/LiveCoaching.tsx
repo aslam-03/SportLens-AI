@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { AppShell } from '@/layouts/AppShell';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Icon } from '@/components/ui/Icon';
+import { Icons } from '@/components/ui/Icon';
 import { Badge } from '@/components/ui/Badge';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -177,30 +177,6 @@ export default function LiveCoaching() {
     <AppShell
       currentUser={currentUser}
       onLogout={handleLogout}
-      onProfileClick={() => alert('Profile clicked')}
-      bottomBarPrimaryAction={{
-        label: isSessionActive ? 'Stop' : 'Start',
-        icon: isSessionActive ? (
-          <Icon name="stop" size="md" />
-        ) : (
-          <Icon name="play" size="md" />
-        ),
-        onClick: handleStartStop
-      }}
-      bottomBarSecondaryActions={[
-        {
-          id: 'capture',
-          icon: <Icon name="camera" size="md" />,
-          label: 'Capture',
-          onClick: handleCaptureFrame
-        },
-        {
-          id: 'toggle-panel',
-          icon: <Icon name="panel" size="md" />,
-          label: 'Feedback',
-          onClick: () => setIsPanelOpen(!isPanelOpen)
-        }
-      ]}
     >
       <div className="w-full h-full flex flex-col lg:flex-row overflow-hidden">
         {/* Camera Section */}
@@ -226,7 +202,7 @@ export default function LiveCoaching() {
                   <div className="flex items-center justify-between">
                     {/* Timer */}
                     <Badge variant="default" className="bg-navy-900/80 backdrop-blur">
-                      <Icon name="clock" size="sm" className="mr-2" />
+                      <Icons.Clock size="sm" className="mr-2" />
                       {formatTime(sessionTime)}
                     </Badge>
 
@@ -257,7 +233,7 @@ export default function LiveCoaching() {
               </>
             ) : (
               <div className="flex flex-col items-center justify-center gap-4 p-6">
-                <Icon name="camera" size="xl" className="text-text-muted" />
+                <Icons.Camera size="xl" className="text-text-muted" />
                 <div className="text-center">
                   <h3 className="text-xl font-semibold text-text-primary mb-2">
                     Camera Ready
@@ -271,7 +247,7 @@ export default function LiveCoaching() {
                   onClick={handleStartStop}
                   className="mt-4"
                 >
-                  <Icon name="play" size="sm" className="mr-2" />
+                  <Icons.Play size="sm" className="mr-2" />
                   Start Session
                 </Button>
               </div>
@@ -306,7 +282,7 @@ export default function LiveCoaching() {
             {/* Panel Header */}
             <div className="p-4 border-b border-navy-700">
               <h3 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-                <Icon name="lightbulb" size="sm" className="text-primary-500" />
+                <Icons.Info size="sm" className="text-primary-500" />
                 Real-time Feedback
               </h3>
             </div>
@@ -328,23 +304,22 @@ export default function LiveCoaching() {
                     }`}
                   >
                     <div className="flex items-start gap-2">
-                      <Icon
-                        name={
-                          feedback.type === 'success'
-                            ? 'check'
-                            : feedback.type === 'warning'
-                              ? 'alert'
-                              : 'info'
-                        }
-                        size="sm"
-                        className={
-                          feedback.type === 'success'
-                            ? 'text-success-500'
-                            : feedback.type === 'warning'
-                              ? 'text-warning-500'
-                              : 'text-primary-500'
-                        }
-                      />
+                      {feedback.type === 'success' ? (
+                        <Icons.Check
+                          size="sm"
+                          className="text-success-500"
+                        />
+                      ) : feedback.type === 'warning' ? (
+                        <Icons.AlertTriangle
+                          size="sm"
+                          className="text-warning-500"
+                        />
+                      ) : (
+                        <Icons.Info
+                          size="sm"
+                          className="text-primary-500"
+                        />
+                      )}
                       <div className="flex-1">
                         <p className="text-sm text-text-primary">{feedback.message}</p>
                         <p className="text-xs text-text-muted mt-1">{feedback.timestamp}</p>
@@ -390,7 +365,7 @@ export default function LiveCoaching() {
               {/* Content */}
               <div className="flex-1 overflow-y-auto px-4 pb-4">
                 <h3 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-                  <Icon name="lightbulb" size="sm" className="text-primary-500" />
+                  <Icons.Info size="sm" className="text-primary-500" />
                   Feedback
                 </h3>
                 <div className="space-y-3">
@@ -406,23 +381,22 @@ export default function LiveCoaching() {
                       }`}
                     >
                       <div className="flex items-start gap-2">
-                        <Icon
-                          name={
-                            feedback.type === 'success'
-                              ? 'check'
-                              : feedback.type === 'warning'
-                                ? 'alert'
-                                : 'info'
-                          }
-                          size="sm"
-                          className={
-                            feedback.type === 'success'
-                              ? 'text-success-500'
-                              : feedback.type === 'warning'
-                                ? 'text-warning-500'
-                                : 'text-primary-500'
-                          }
-                        />
+                        {feedback.type === 'success' ? (
+                          <Icons.Check
+                            size="sm"
+                            className="text-success-500"
+                          />
+                        ) : feedback.type === 'warning' ? (
+                          <Icons.AlertTriangle
+                            size="sm"
+                            className="text-warning-500"
+                          />
+                        ) : (
+                          <Icons.Info
+                            size="sm"
+                            className="text-primary-500"
+                          />
+                        )}
                         <div className="flex-1">
                           <p className="text-sm text-text-primary">{feedback.message}</p>
                           <p className="text-xs text-text-muted mt-1">{feedback.timestamp}</p>

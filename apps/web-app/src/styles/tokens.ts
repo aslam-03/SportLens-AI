@@ -1,51 +1,52 @@
 /**
- * Design Tokens for SportLens AI
+ * Design Tokens for SportLens AI - Production Grade
  * 
- * Mobile-first design system with production-grade tokens.
- * Inspired by modern sports-tech and Apple/Stripe design principles.
+ * Clean, professional design system following mobile-first principles.
+ * No excessive glow effects, consistent spacing, and clear visual hierarchy.
  */
 
 export const colors = {
-  // Primary palette - Deep Navy to Soft Cyan
+  // Primary palette - Deep Navy (Professional)
   primary: {
-    50: '#E6F7FF',
-    100: '#BAE7FF',
-    200: '#91D5FF',
-    300: '#69C0FF',
-    400: '#40A9FF',
-    500: '#1890FF', // Main brand blue
-    600: '#096DD9',
-    700: '#0050B3',
-    800: '#003A8C',
-    900: '#002766',
+    50: '#E8EEF7',
+    100: '#BFD2E8',
+    200: '#92B3D8',
+    300: '#6594C8',
+    400: '#4988C4', // Accent Blue - use sparingly
+    500: '#1C4D8D', // Main Blue
+    600: '#164179',
+    700: '#0F2854', // Deep Navy - primary background
+    800: '#0A1C3E',
+    900: '#051028',
   },
   
-  // Navy - Deep professional background
+  // Navy - Background hierarchy
   navy: {
-    50: '#F0F4F8',
-    100: '#D9E2EC',
-    200: '#BCCCDC',
-    300: '#9FB3C8',
-    400: '#829AB1',
-    500: '#627D98',
-    600: '#486581',
-    700: '#334E68',
-    800: '#243B53',
-    900: '#102A43', // Deep navy
+    50: '#F0F2F5',
+    100: '#E1E4EA',
+    200: '#C3C9D5',
+    300: '#A5AEBF',
+    400: '#8793AA',
+    500: '#697895',
+    600: '#4B5D80',
+    700: '#2D426B', // Card background
+    800: '#1E2F4F', // Slightly lighter than primary-700
+    900: '#0F2854', // Deep navy (same as primary-700)
+    950: '#0A1929', // Darkest background
   },
   
-  // Cyan - Soft highlights
+  // Cyan - Light accent (use minimally)
   cyan: {
-    50: '#E0FCFF',
-    100: '#BEF8FD',
-    200: '#87EAF2',
-    300: '#54D1DB',
-    400: '#38BEC9', // Soft cyan accent
-    500: '#2CB1BC',
-    600: '#14919B',
-    700: '#0E7C86',
-    800: '#0A6C74',
-    900: '#044E54',
+    50: '#E0F7FA',
+    100: '#B2EBF2',
+    200: '#80DEEA',
+    300: '#4DD0E1',
+    400: '#26C6DA',
+    500: '#BDE8F5', // Light Cyan - for highlights only
+    600: '#00ACC1',
+    700: '#0097A7',
+    800: '#00838F',
+    900: '#006064',
   },
   
   // Neutrals - Clean grays
@@ -53,7 +54,7 @@ export const colors = {
     50: '#F9FAFB',
     100: '#F3F4F6',
     200: '#E5E7EB',
-    300: '#D1D5DB',
+    300: '#D1D5DB', // Muted text
     400: '#9CA3AF',
     500: '#6B7280',
     600: '#4B5563',
@@ -62,7 +63,7 @@ export const colors = {
     900: '#111827',
   },
   
-  // Semantic colors
+  // Semantic colors - subtle, professional
   success: {
     50: '#ECFDF5',
     100: '#D1FAE5',
@@ -95,11 +96,12 @@ export const colors = {
     700: '#1D4ED8',
   },
   
-  // White and black
+  // Pure colors
   white: '#FFFFFF',
   black: '#000000',
 } as const;
 
+// Consistent spacing - 8px grid system
 export const spacing = {
   0: '0',
   1: '0.25rem',   // 4px
@@ -115,86 +117,58 @@ export const spacing = {
   20: '5rem',     // 80px
   24: '6rem',     // 96px
   32: '8rem',     // 128px
-  40: '10rem',    // 160px
-  48: '12rem',    // 192px
-  56: '14rem',    // 224px
-  64: '16rem',    // 256px
 } as const;
 
-export const borderRadius = {
-  none: '0',
-  sm: '0.25rem',    // 4px
-  DEFAULT: '0.5rem', // 8px
-  md: '0.75rem',    // 12px
-  lg: '1rem',       // 16px
-  xl: '1.5rem',     // 24px
-  '2xl': '2rem',    // 32px
-  full: '9999px',
+// Typography - Mobile-first scale
+export const typography = {
+  // H1: 28 mobile / 40 desktop
+  h1Mobile: { fontSize: '1.75rem', lineHeight: '2.25rem', fontWeight: 600 }, // 28px
+  h1Desktop: { fontSize: '2.5rem', lineHeight: '3rem', fontWeight: 600 },    // 40px
+  
+  // H2: 20px
+  h2: { fontSize: '1.25rem', lineHeight: '1.75rem', fontWeight: 600 },       // 20px
+  
+  // Body: 16px
+  body: { fontSize: '1rem', lineHeight: '1.5rem', fontWeight: 400 },         // 16px
+  
+  // Small: 14px
+  small: { fontSize: '0.875rem', lineHeight: '1.25rem', fontWeight: 400 },   // 14px
+  
+  // Muted text color
+  mutedClass: 'text-gray-300',
+  primaryClass: 'text-white',
 } as const;
 
-export const fontSize = {
-  // Mobile-first typography scale
-  xs: ['0.75rem', { lineHeight: '1rem' }],      // 12px
-  sm: ['0.875rem', { lineHeight: '1.25rem' }],  // 14px
-  base: ['1rem', { lineHeight: '1.5rem' }],     // 16px
-  lg: ['1.125rem', { lineHeight: '1.75rem' }],  // 18px
-  xl: ['1.25rem', { lineHeight: '1.75rem' }],   // 20px
-  '2xl': ['1.5rem', { lineHeight: '2rem' }],    // 24px
-  '3xl': ['1.875rem', { lineHeight: '2.25rem' }], // 30px
-  '4xl': ['2.25rem', { lineHeight: '2.5rem' }], // 36px
-  '5xl': ['3rem', { lineHeight: '1' }],         // 48px (H1 mobile)
-  '6xl': ['3.75rem', { lineHeight: '1' }],      // 60px (H1 desktop)
+// Touch targets - minimum 44px for accessibility
+export const touchTarget = {
+  min: '2.75rem', // 44px
+  comfortable: '3rem', // 48px
 } as const;
 
-export const fontWeight = {
-  light: '300',
-  normal: '400',
-  medium: '500',
-  semibold: '600',
-  bold: '700',
-  extrabold: '800',
-} as const;
-
-export const breakpoints = {
-  // Mobile-first breakpoints
-  sm: '375px',   // Small mobile
-  md: '768px',   // Tablet
-  lg: '1024px',  // Desktop
-  xl: '1280px',  // Large desktop
-  '2xl': '1536px', // Extra large
-} as const;
-
-export const shadows = {
-  sm: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-  DEFAULT: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-  md: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-  lg: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
-  xl: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-  '2xl': '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-  inner: 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.06)',
-  none: 'none',
-} as const;
-
-export const zIndex = {
-  base: 0,
-  dropdown: 1000,
-  sticky: 1020,
-  fixed: 1030,
-  modalBackdrop: 1040,
-  modal: 1050,
-  popover: 1060,
-  tooltip: 1070,
-  toast: 1080,
-} as const;
-
-export const transitions = {
+// Animation timing
+export const animation = {
   fast: '150ms cubic-bezier(0.4, 0, 0.2, 1)',
   base: '200ms cubic-bezier(0.4, 0, 0.2, 1)',
   slow: '300ms cubic-bezier(0.4, 0, 0.2, 1)',
   smooth: '500ms cubic-bezier(0.4, 0, 0.2, 1)',
 } as const;
 
-// Accessibility: minimum touch target size
-export const touchTarget = {
-  min: '44px', // iOS/Android minimum for accessibility
+// Border radius - 16px standard
+export const borderRadius = {
+  none: '0',
+  sm: '0.5rem',    // 8px
+  DEFAULT: '1rem', // 16px (standard)
+  md: '1rem',      // 16px
+  lg: '1.5rem',    // 24px
+  xl: '2rem',      // 32px
+  full: '9999px',
+} as const;
+
+// Responsive breakpoints
+export const breakpoints = {
+  sm: '640px',
+  md: '768px',
+  lg: '1024px',
+  xl: '1280px',
+  '2xl': '1536px',
 } as const;

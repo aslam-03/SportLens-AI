@@ -4,7 +4,7 @@ import { AppShell } from '@/layouts/AppShell';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { Icon } from '@/components/ui/Icon';
+import { Icons } from '@/components/ui/Icon';
 
 export default function Sessions() {
   const [sessions] = useState([
@@ -50,7 +50,7 @@ export default function Sessions() {
                     </Badge>
                   </div>
                   <Button variant="ghost" size="sm">
-                    <Icon name="play" size="md" />
+                    <Icons.Play size="md" />
                   </Button>
                 </div>
               </Card>

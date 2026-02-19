@@ -4,7 +4,7 @@ import { AppShell } from '@/layouts/AppShell';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Icon } from '@/components/ui/Icon';
+import { Icons } from '@/components/ui/Icon';
 
 export default function Account() {
   const [profile] = useState({
@@ -64,7 +64,7 @@ export default function Account() {
                   </div>
                   {pref.editable && (
                     <Button variant="ghost" size="sm">
-                      <Icon name="settings" size="md" />
+                      <Icons.Settings size="md" />
                     </Button>
                   )}
                 </div>

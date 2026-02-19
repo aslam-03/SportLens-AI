@@ -32,25 +32,6 @@ export default function ShellDemo() {
     <AppShell
       currentUser={mockUser}
       onLogout={handleLogout}
-      bottomBarPrimaryAction={{
-        label: 'Start Session',
-        icon: '▶️',
-        onClick: handleStartSession,
-      }}
-      bottomBarSecondaryActions={[
-        {
-          id: 'freeze',
-          icon: '📷',
-          label: 'Freeze Frame',
-          onClick: () => alert('Freeze Frame clicked!'),
-        },
-        {
-          id: 'upload',
-          icon: '📤',
-          label: 'Upload',
-          onClick: () => alert('Upload clicked!'),
-        },
-      ]}
     >
       {/* Demo Content */}
       <div className="px-4 py-6 max-w-4xl mx-auto space-y-6">

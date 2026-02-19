@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { AppShell } from '@/layouts/AppShell';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Icon } from '@/components/ui/Icon';
+import { Icons } from '@/components/ui/Icon';
 import { motion } from 'framer-motion';
 
 interface Session {
@@ -115,27 +115,6 @@ export default function Home() {
     <AppShell
       currentUser={currentUser}
       onLogout={handleLogout}
-      onProfileClick={() => alert('Profile clicked')}
-      bottomBarPrimaryAction={{
-        label: 'Start Session',
-        icon: <Icon name="play" size="md" />,
-        onClick: handleStartSession,
-        isLoading
-      }}
-      bottomBarSecondaryActions={[
-        {
-          id: 'history',
-          icon: <Icon name="history" size="md" />,
-          label: 'History',
-          onClick: () => alert('View history')
-        },
-        {
-          id: 'camera',
-          icon: <Icon name="camera" size="md" />,
-          label: 'Camera',
-          onClick: () => alert('Open camera')
-        }
-      ]}
     >
       <motion.div
         className="w-full max-w-7xl mx-auto"
@@ -170,8 +149,7 @@ export default function Home() {
                     Improve Batting Stance
                   </h2>
                 </div>
-                <Icon
-                  name="target"
+                <Icons.Activity
                   size="lg"
                   className="text-primary-200 flex-shrink-0"
                 />
@@ -256,7 +234,7 @@ export default function Home() {
               className="w-full h-auto py-4 flex flex-col items-center gap-2"
               onClick={handleStartSession}
             >
-              <Icon name="play" size="lg" />
+              <Icons.Play size="lg" />
               <span className="text-sm">Start Session</span>
             </Button>
             <Button
@@ -264,7 +242,7 @@ export default function Home() {
               className="w-full h-auto py-4 flex flex-col items-center gap-2"
               onClick={() => alert('View sessions')}
             >
-              <Icon name="video" size="lg" />
+              <Icons.Video size="lg" />
               <span className="text-sm">View Sessions</span>
             </Button>
             <Button
@@ -272,7 +250,7 @@ export default function Home() {
               className="w-full h-auto py-4 flex flex-col items-center gap-2"
               onClick={() => alert('View reports')}
             >
-              <Icon name="trends" size="lg" />
+              <Icons.TrendingUp size="lg" />
               <span className="text-sm">View Reports</span>
             </Button>
             <Button
@@ -280,7 +258,7 @@ export default function Home() {
               className="w-full h-auto py-4 flex flex-col items-center gap-2"
               onClick={() => alert('View tips')}
             >
-              <Icon name="info" size="lg" />
+              <Icons.Info size="lg" />
               <span className="text-sm">Get Tips</span>
             </Button>
           </div>
@@ -331,7 +309,7 @@ export default function Home() {
 
                     {/* Duration */}
                     <div className="flex items-center gap-2 text-text-secondary text-sm mb-4">
-                      <Icon name="clock" size="sm" />
+                      <Icons.Clock size="sm" />
                       <span>{session.duration}</span>
                     </div>
 
