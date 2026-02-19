@@ -3,9 +3,16 @@
 AI-powered coaching for Cricket and General Fitness. This monorepo includes:
 
 - `apps/landing` — Next.js + Tailwind marketing site (Vercel-ready)
-- `apps/web-app` — React + Vite + Tailwind real-time coaching UI
-- `backend/` — FastAPI service with health and sessions placeholder routes
+- `apps/web-app` — React + Vite + Tailwind real-time coaching UI with Firebase
+- `backend/` — FastAPI service for video uploads to Cloudflare R2
 - `docs/` — Architecture notes, diagrams, and research
+
+## Architecture
+
+- **Frontend**: React with Firebase client SDK for authentication and Firestore for session data
+- **Backend**: FastAPI for video upload handling only
+- **Storage**: Cloudflare R2 for video storage, Firestore for session metadata
+- **Authentication**: Firebase Auth
 
 ## Quickstart
 
@@ -24,6 +31,7 @@ cd apps/web-app && npm install && npm run dev        # Vite SPA (default port 51
 cd backend
 python -m venv .venv && .venv\Scripts\activate      # Windows
 pip install -r requirements.txt
+# Set up Firebase Admin SDK credentials (see docs/firebase-gcp-setup.md)
 uvicorn main:app --reload --port 8000
 ```
 
@@ -49,17 +57,19 @@ Copy the examples to real `.env` files before running, and never commit secrets.
 sportlens-ai/
 ├── apps/
 │   ├── landing/      # Next.js landing site (pages: home, product, tech-stack)
-│   └── web-app/      # Vite SPA with webcam + canvas placeholder
-├── backend/          # FastAPI with /health and /sessions
+│   └── web-app/      # Vite SPA with real-time pose estimation & Firebase
+├── backend/          # FastAPI with /health and /upload (R2 video storage)
 ├── docs/             # Architecture notes & diagrams
 ├── .gitignore
 └── README.md
 ```
 
 ## Notes
-- Frontend overlays are placeholders for future MediaPipe / MoveNet integration.
-- Backend `sessions` routes are mocked until persistence is added.
-- Everything uses open-source, zero-cost tooling for local dev.
+- Frontend uses MediaPipe Pose for real-time pose estimation
+- Session data is persisted to Firestore (client-side with Firebase SDK)
+- Backend handles video uploads to Cloudflare R2 only
+- All session history is fetched from Firestore, not backend API
+- Firebase Authentication is required for multi-device session sync
 
 ## Firebase + GCP Setup
 - Production-oriented setup guide: `docs/firebase-gcp-setup.md`

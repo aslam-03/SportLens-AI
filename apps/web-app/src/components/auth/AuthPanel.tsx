@@ -76,18 +76,18 @@ export default function AuthPanel({
   };
 
   return (
-    <div className="mx-auto w-full max-w-md rounded-2xl border border-white/10 bg-slate-900/70 p-6 shadow-xl">
-      <h2 className="text-xl font-semibold text-slate-50">{title}</h2>
-      <p className="mt-2 text-sm text-slate-300">{subtitle}</p>
+    <div className="mx-auto w-full max-w-md rounded-2xl border border-primary-400/20 bg-navy-800/80 backdrop-blur-sm p-6 shadow-xl">
+      <h2 className="text-xl font-semibold text-white">{title}</h2>
+      <p className="mt-2 text-sm text-gray-300">{subtitle}</p>
 
-      <div className="mt-4 grid grid-cols-2 rounded-xl border border-white/10 bg-slate-950/60 p-1">
+      <div className="mt-4 grid grid-cols-2 rounded-xl border border-primary-400/20 bg-navy-900/80 p-1">
         <button
           type="button"
           onClick={() => setMode('signin')}
-          className={`rounded-lg px-3 py-2 text-sm transition ${
+          className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
             mode === 'signin'
-              ? 'bg-sky-500 text-white'
-              : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100'
+              ? 'bg-primary-500 text-white shadow-sm'
+              : 'text-gray-300 hover:bg-navy-700 hover:text-white'
           }`}
         >
           Sign In
@@ -95,10 +95,10 @@ export default function AuthPanel({
         <button
           type="button"
           onClick={() => setMode('signup')}
-          className={`rounded-lg px-3 py-2 text-sm transition ${
+          className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
             mode === 'signup'
-              ? 'bg-sky-500 text-white'
-              : 'text-slate-300 hover:bg-slate-800 hover:text-slate-100'
+              ? 'bg-primary-500 text-white shadow-sm'
+              : 'text-gray-300 hover:bg-navy-700 hover:text-white'
           }`}
         >
           Sign Up
@@ -106,19 +106,19 @@ export default function AuthPanel({
       </div>
 
       <form className="mt-4 space-y-3" onSubmit={onEmailSubmit}>
-        <label className="block text-xs uppercase tracking-wide text-slate-400">
+        <label className="block text-xs uppercase tracking-wide text-gray-400 font-medium">
           Email
           <input
             type="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none ring-sky-500/50 transition focus:ring-2"
+            className="mt-1 w-full rounded-lg border border-primary-400/20 bg-navy-900 px-3 py-2 text-sm text-white outline-none ring-primary-400/50 transition focus:ring-2 focus:border-primary-400"
             placeholder="athlete@example.com"
           />
         </label>
 
-        <label className="block text-xs uppercase tracking-wide text-slate-400">
+        <label className="block text-xs uppercase tracking-wide text-gray-400 font-medium">
           Password
           <input
             type="password"
@@ -126,7 +126,7 @@ export default function AuthPanel({
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none ring-sky-500/50 transition focus:ring-2"
+            className="mt-1 w-full rounded-lg border border-primary-400/20 bg-navy-900 px-3 py-2 text-sm text-white outline-none ring-primary-400/50 transition focus:ring-2 focus:border-primary-400"
             placeholder="At least 6 characters"
           />
         </label>
@@ -140,23 +140,23 @@ export default function AuthPanel({
         <button
           type="submit"
           disabled={submitting}
-          className="w-full rounded-lg bg-sky-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-600"
+          className="w-full rounded-lg bg-primary-500 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-primary-400 disabled:cursor-not-allowed disabled:bg-navy-700 disabled:text-gray-400 shadow-sm"
         >
           {submitting ? 'Please wait...' : mode === 'signin' ? 'Sign In with Email' : 'Create Account'}
         </button>
       </form>
 
-      <div className="my-4 flex items-center gap-3 text-xs text-slate-500">
-        <span className="h-px flex-1 bg-white/10" />
+      <div className="my-4 flex items-center gap-3 text-xs text-gray-500 font-medium">
+        <span className="h-px flex-1 bg-primary-400/20" />
         <span>OR</span>
-        <span className="h-px flex-1 bg-white/10" />
+        <span className="h-px flex-1 bg-primary-400/20" />
       </div>
 
       <button
         type="button"
         onClick={onGoogleSignIn}
         disabled={submitting}
-        className="w-full rounded-lg border border-white/20 bg-white/5 px-3 py-2 text-sm font-semibold text-slate-100 transition hover:border-sky-400 hover:text-sky-200 disabled:cursor-not-allowed disabled:opacity-70"
+        className="w-full rounded-lg border border-primary-400/30 bg-white/5 px-3 py-2.5 text-sm font-semibold text-white transition hover:border-primary-400 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
       >
         Continue with Google
       </button>
