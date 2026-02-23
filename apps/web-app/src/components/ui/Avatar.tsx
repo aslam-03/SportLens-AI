@@ -2,19 +2,20 @@
  * Avatar Component
  * 
  * Displays user avatar with fallback to initials.
- * Sizes: sm, md, lg
- * States: default, loading, error
+ * Always renders a <div> — never a <button>.
+ * Parent components handle click behavior to avoid nested <button> issues.
  */
 
 import { cn } from '../../utils/cn';
 
 interface AvatarProps {
   src?: string;
+  imageUrl?: string;
   alt?: string;
+  name?: string;
   initials?: string;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
-  onClick?: () => void;
 }
 
 const sizeStyles = {
@@ -25,15 +26,18 @@ const sizeStyles = {
 
 export const Avatar = ({
   src,
-  alt = 'User avatar',
+  imageUrl,
+  alt,
+  name,
   initials = '?',
   size = 'md',
   className,
-  onClick,
 }: AvatarProps) => {
+  const imgSrc = src || imageUrl;
+  const altText = alt || name || 'User avatar';
+
   return (
-    <button
-      onClick={onClick}
+    <div
       className={cn(
         'flex items-center justify-center',
         'rounded-full font-bold',
@@ -41,24 +45,20 @@ export const Avatar = ({
         'text-white',
         'flex-shrink-0',
         sizeStyles[size],
-        onClick && 'cursor-pointer hover:from-primary-700 hover:to-primary-800 transition-all',
         className
       )}
-      title={alt}
-      type="button"
+      title={altText}
     >
-      {src ? (
+      {imgSrc ? (
         <img
-          src={src}
-          alt={alt}
-          className={cn(
-            'w-full h-full rounded-full object-cover'
-          )}
+          src={imgSrc}
+          alt={altText}
+          className="w-full h-full rounded-full object-cover"
         />
       ) : (
         <span>{initials}</span>
       )}
-    </button>
+    </div>
   );
 };
 

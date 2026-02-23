@@ -40,7 +40,7 @@ export default function Sessions() {
       try {
         setIsLoading(true);
         const firestoreSessions = await getSessionsFromFirestore(user.uid);
-        
+
         // Convert Firestore sessions to display format
         const displaySessions: DisplaySession[] = firestoreSessions.map(s => {
           const activityNames: Record<string, { sport: string; type: string }> = {
@@ -83,8 +83,8 @@ export default function Sessions() {
   });
 
   // Handle delete confirmation
-  const handleDeleteClick = (sessionId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDeleteClick = (sessionId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setSessionToDelete(sessionId);
     setShowDeleteConfirm(true);
   };
@@ -96,10 +96,10 @@ export default function Sessions() {
     try {
       setDeletingSessionId(sessionToDelete);
       await deleteSessionFromFirestore(user.uid, sessionToDelete);
-      
+
       // Remove from local state
       setSessions(prev => prev.filter(s => s.id !== sessionToDelete));
-      
+
       setShowDeleteConfirm(false);
       setSessionToDelete(null);
     } catch (error) {
@@ -131,8 +131,8 @@ export default function Sessions() {
                 {isLoading ? 'Loading...' : `${filteredSessions.length} sessions found`}
               </p>
             </div>
-            <Button 
-              variant="primary" 
+            <Button
+              variant="primary"
               onClick={() => navigate('/coaching')}
               className="hover:scale-105 active:scale-95 transition-transform"
             >
@@ -144,31 +144,28 @@ export default function Sessions() {
           <div className="flex gap-2 mb-6">
             <button
               onClick={() => setFilter('all')}
-              className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
-                filter === 'all'
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-navy-800 text-gray-400 hover:bg-navy-700'
-              }`}
+              className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${filter === 'all'
+                ? 'bg-primary-600 text-white'
+                : 'bg-navy-800 text-gray-400 hover:bg-navy-700'
+                }`}
             >
               All ({sessions.length})
             </button>
             <button
               onClick={() => setFilter('fitness')}
-              className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
-                filter === 'fitness'
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-navy-800 text-gray-400 hover:bg-navy-700'
-              }`}
+              className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${filter === 'fitness'
+                ? 'bg-primary-600 text-white'
+                : 'bg-navy-800 text-gray-400 hover:bg-navy-700'
+                }`}
             >
               Fitness ({sessions.filter(s => s.sport === 'Fitness').length})
             </button>
             <button
               onClick={() => setFilter('cricket')}
-              className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${
-                filter === 'cricket'
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-navy-800 text-gray-400 hover:bg-navy-700'
-              }`}
+              className={`px-4 py-2 rounded-lg font-semibold text-sm transition-colors ${filter === 'cricket'
+                ? 'bg-primary-600 text-white'
+                : 'bg-navy-800 text-gray-400 hover:bg-navy-700'
+                }`}
             >
               Cricket ({sessions.filter(s => s.sport === 'Cricket').length})
             </button>
@@ -197,7 +194,7 @@ export default function Sessions() {
               </div>
               <h3 className="text-xl font-semibold mb-2">No Sessions Yet</h3>
               <p className="text-gray-400 mb-6">
-                {filter === 'all' 
+                {filter === 'all'
                   ? 'Start your first training session to see it here'
                   : `No ${filter} sessions found`
                 }
@@ -218,8 +215,8 @@ export default function Sessions() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3 }}
                 >
-                  <Card 
-                    className="p-6 cursor-pointer hover:border-primary-500/50 transition-all" 
+                  <Card
+                    className="p-6 cursor-pointer hover:border-primary-500/50 transition-all"
                     hoverable
                     onClick={() => navigate(`/sessions/${session.id}`)}
                   >
@@ -248,20 +245,20 @@ export default function Sessions() {
                         </Badge>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="sm"
-                          onClick={(e) => handleDeleteClick(session.id, e)}
+                          onClick={(e?: React.MouseEvent<HTMLButtonElement>) => { e?.stopPropagation(); handleDeleteClick(session.id, e as React.MouseEvent); }}
                           className="text-error-400 hover:text-error-300 hover:bg-error-500/10"
                           disabled={deletingSessionId === session.id}
                         >
                           <Icons.Trash size="md" />
                         </Button>
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          onClick={(e?: React.MouseEvent<HTMLButtonElement>) => {
+                            e?.stopPropagation();
                             navigate(`/sessions/${session.id}`);
                           }}
                         >

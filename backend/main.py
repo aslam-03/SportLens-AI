@@ -43,9 +43,16 @@ from auth import initialize_firebase
 # Import routes with error handling
 try:
     from routes.upload import router as upload_router
-    logger.info("✅ Upload router imported successfully")
+    logger.info("Upload router imported successfully")
 except ImportError as e:
-    logger.error(f"❌ Failed to import upload router: {e}")
+    logger.error(f"Failed to import upload router: {e}")
+    raise
+
+try:
+    from routes.chat import router as chat_router
+    logger.info("Chat router imported successfully")
+except ImportError as e:
+    logger.error(f"Failed to import chat router: {e}")
     raise
 
 # ============================================================================
@@ -138,8 +145,9 @@ async def health_check():
 # Routes
 # ============================================================================
 
-# Include upload router
+# Include routers
 app.include_router(upload_router)
+app.include_router(chat_router)
 
 # ============================================================================
 # Root Endpoint

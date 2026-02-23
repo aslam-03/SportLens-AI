@@ -21,7 +21,7 @@ interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, keyo
   isFullWidth?: boolean;
   leftIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
-  onClick?: () => void;
+  onClick?: (e?: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
 }
 
@@ -66,16 +66,16 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           'transition-all duration-200',
           'focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500',
           'disabled:cursor-not-allowed disabled:opacity-60',
-          
+
           // Variant styles
           variantStyles[variant],
-          
+
           // Size styles
           sizeStyles[size],
-          
+
           // Full width
           isFullWidth && 'w-full',
-          
+
           // Custom className
           className
         )}
@@ -108,11 +108,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
             />
           </svg>
         )}
-        
+
         {!isLoading && leftIcon && <span className="flex-shrink-0">{leftIcon}</span>}
-        
+
         <span>{children}</span>
-        
+
         {!isLoading && rightIcon && <span className="flex-shrink-0">{rightIcon}</span>}
       </motion.button>
     );
