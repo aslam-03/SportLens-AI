@@ -17,6 +17,7 @@ import {
     getDoc,
     setDoc,
     updateDoc,
+    deleteDoc,
     query,
     where,
     orderBy,
@@ -163,3 +164,74 @@ export async function clearChat(chatId: string): Promise<void> {
         updatedAt: serverTimestamp(),
     });
 }
+
+// ============================================================================
+// Sidebar helpers
+// ============================================================================
+
+export interface ChatSummary {
+    id: string;
+    title: string;
+    preview: string;
+    messageCount: number;
+    updatedAt: Timestamp | null;
+}
+
+/**
+ * Get all chat sessions for a user (for sidebar).
+ * Returns summaries sorted by most recent first.
+ */
+export async function getAllChats(userId: string): Promise<ChatSummary[]> {
+    try {
+        const q = query(
+            collection(db, CHATS_COLLECTION),
+            where('userId', '==', userId),
+            orderBy('updatedAt', 'desc'),
+            limit(50),
+        );
+
+        const snapshot = await getDocs(q);
+
+        return snapshot.docs
+            .map((docSnap) => {
+                const data = docSnap.data();
+                const messages = data.messages || [];
+
+                // Generate title from first user message
+                const firstUserMsg = messages.find(
+                    (m: { role: string; text: string }) => m.role === 'user',
+                );
+                const title = firstUserMsg
+                    ? firstUserMsg.text.slice(0, 50) + (firstUserMsg.text.length > 50 ? '...' : '')
+                    : 'New conversation';
+
+                // Preview from last message
+                const lastMsg = messages[messages.length - 1];
+                const preview = lastMsg
+                    ? lastMsg.text.slice(0, 80) + (lastMsg.text.length > 80 ? '...' : '')
+                    : 'No messages yet';
+
+                return {
+                    id: docSnap.id,
+                    title,
+                    preview,
+                    messageCount: messages.length,
+                    updatedAt: data.updatedAt || null,
+                };
+            })
+            // Only show chats that have at least 1 message
+            .filter((chat) => chat.messageCount > 0);
+    } catch (error) {
+        console.error('Error fetching all chats:', error);
+        return [];
+    }
+}
+
+/**
+ * Delete a chat document entirely.
+ */
+export async function deleteChat(chatId: string): Promise<void> {
+    const chatRef = doc(db, CHATS_COLLECTION, chatId);
+    await deleteDoc(chatRef);
+}
+
