@@ -1,9 +1,9 @@
 /**
  * Gemini Chat Service
  * 
- * Handles communication with the AI coach backend.
- * Primary: calls backend /api/chat (secure, API key never exposed)
- * Fallback: direct Gemini API call (temporary, for dev only)
+ * ALL AI calls go through the backend only.
+ * No direct Gemini API calls from the frontend.
+ * No fallback. No retry loops. If backend fails → show error.
  */
 
 // ============================================================================
@@ -26,15 +26,6 @@ export interface ChatResponse {
 // ============================================================================
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
-
-const SYSTEM_PROMPT = `You are SportLens AI Coach Assistant.
-You are an expert in cricket biomechanics, sports performance analysis, and fitness coaching.
-You only answer questions related to sports training, session analysis, form correction, injury prevention, and SportLens AI features.
-If a user asks anything outside sports or this app's domain, politely refuse.
-Keep answers concise, practical, and coaching-oriented.
-Do not discuss politics, programming, entertainment, or general trivia.`;
 
 const SPORTS_KEYWORDS = [
     'cricket', 'fitness', 'bowling', 'batting', 'squat', 'posture',
@@ -58,7 +49,7 @@ const RESTRICTED_MESSAGE =
     "I'm designed specifically to assist with sports performance, cricket, fitness training, and SportLens AI session analysis. Please ask a question related to those areas.";
 
 // ============================================================================
-// Domain filter
+// Domain filter (client-side pre-filter for fast rejection)
 // ============================================================================
 
 function isSportsRelated(message: string): boolean {
@@ -67,7 +58,7 @@ function isSportsRelated(message: string): boolean {
 }
 
 // ============================================================================
-// Backend call (primary - secure)
+// Backend call (the ONLY path to Gemini)
 // ============================================================================
 
 async function callBackend(
@@ -75,95 +66,55 @@ async function callBackend(
     history: ChatMessage[],
     sessionContext?: string,
 ): Promise<ChatResponse> {
-    const response = await fetch(`${BACKEND_URL}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            message,
-            history: history.slice(-20),
-            session_context: sessionContext || null,
-        }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
 
-    if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.detail || `Backend error: ${response.status}`);
-    }
+    try {
+        // Send only last 6 messages, each truncated to 500 chars
+        const trimmedHistory = history.slice(-6).map((msg) => ({
+            role: msg.role,
+            text: msg.text.slice(0, 500),
+        }));
 
-    return response.json();
-}
-
-// ============================================================================
-// Direct Gemini call (fallback - dev only)
-// ============================================================================
-
-async function callGeminiFallback(
-    message: string,
-    history: ChatMessage[],
-    sessionContext?: string,
-): Promise<ChatResponse> {
-    if (!GEMINI_API_KEY) {
-        throw new Error('AI service is not configured. Please contact the administrator.');
-    }
-
-    // Domain pre-filter
-    if (!isSportsRelated(message)) {
-        return { reply: RESTRICTED_MESSAGE, restricted: true };
-    }
-
-    // Build contents
-    const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
-
-    // System instruction
-    contents.push(
-        { role: 'user', parts: [{ text: SYSTEM_PROMPT }] },
-        {
-            role: 'model',
-            parts: [
-                {
-                    text: 'Understood. I am SportLens AI Coach Assistant. I will only answer sports-related questions. How can I help you with your training today?',
-                },
-            ],
-        },
-    );
-
-    // History
-    const recentHistory = history.slice(-20);
-    for (const msg of recentHistory) {
-        contents.push({
-            role: msg.role === 'user' ? 'user' : 'model',
-            parts: [{ text: msg.text }],
+        const response = await fetch(`${BACKEND_URL}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message,
+                history: trimmedHistory,
+                session_context: sessionContext || null,
+            }),
+            signal: controller.signal,
         });
+
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+
+            // Map specific HTTP codes to user-friendly messages
+            if (response.status === 429) {
+                throw new Error('AI is temporarily busy. Please wait a few seconds and try again.');
+            }
+            if (response.status === 502 || response.status === 503) {
+                throw new Error('AI service is temporarily unavailable. Please try again shortly.');
+            }
+            if (response.status === 504) {
+                throw new Error('AI service timed out. Please try again.');
+            }
+
+            throw new Error(
+                errData.detail || `Service error (${response.status}). Please try again.`
+            );
+        }
+
+        return response.json();
+    } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+            throw new Error('Request timed out. Please try again.');
+        }
+        throw err;
+    } finally {
+        clearTimeout(timeout);
     }
-
-    // Current message with optional session context
-    const userText = sessionContext
-        ? `[User Session Context: ${sessionContext}]\n\n${message}`
-        : message;
-
-    contents.push({ role: 'user', parts: [{ text: userText }] });
-
-    const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents }),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const candidates = data.candidates || [];
-
-    if (!candidates.length) {
-        throw new Error('AI service returned an empty response.');
-    }
-
-    const parts = candidates[0]?.content?.parts || [];
-    const reply = parts[0]?.text || 'I could not generate a response. Please try rephrasing your question.';
-
-    return { reply, restricted: false };
 }
 
 // ============================================================================
@@ -172,7 +123,7 @@ async function callGeminiFallback(
 
 /**
  * Send a message to the AI coach.
- * Tries backend first, then falls back to direct Gemini call.
+ * Backend-only. No fallback. No retry.
  */
 export async function sendChatMessage(
     message: string,
@@ -184,10 +135,5 @@ export async function sendChatMessage(
         return { reply: RESTRICTED_MESSAGE, restricted: true };
     }
 
-    try {
-        return await callBackend(message, history, sessionContext);
-    } catch (backendError) {
-        console.warn('Backend unavailable, falling back to direct Gemini call:', backendError);
-        return await callGeminiFallback(message, history, sessionContext);
-    }
+    return callBackend(message, history, sessionContext);
 }

@@ -1,13 +1,15 @@
 /**
  * MessageBubble - Individual chat message
  * 
- * User messages appear on the right with primary background.
- * Assistant messages appear on the left with dark background.
- * Includes a copy button on hover.
+ * User messages appear on the right with primary background (plain text).
+ * Assistant messages appear on the left with structured markdown rendering
+ * (headings, bold, lists, code blocks, tables) — ChatGPT style.
  */
 
 import { useState } from 'react';
 import { Copy, Check } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { cn } from '@/utils/cn';
 import type { ChatMessage } from '@/services/geminiService';
 
@@ -57,7 +59,7 @@ export const MessageBubble = ({ message, className }: MessageBubbleProps) => {
             </div>
 
             {/* Message content */}
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1 min-w-0">
                 <div
                     className={cn(
                         'relative rounded-2xl px-4 py-3 text-sm leading-relaxed break-words',
@@ -66,8 +68,17 @@ export const MessageBubble = ({ message, className }: MessageBubbleProps) => {
                             : 'bg-navy-800 border border-navy-700 text-gray-100 rounded-tl-sm',
                     )}
                 >
-                    {/* Render text with line breaks */}
-                    <div className="whitespace-pre-wrap">{message.text}</div>
+                    {isUser ? (
+                        /* User messages: plain text */
+                        <div className="whitespace-pre-wrap">{message.text}</div>
+                    ) : (
+                        /* AI messages: structured markdown */
+                        <div className="markdown-body">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {message.text}
+                            </ReactMarkdown>
+                        </div>
+                    )}
 
                     {/* Copy button (visible on hover) */}
                     {!isUser && (

@@ -1,17 +1,16 @@
 /**
  * ChatLayout - Main chat interface container
  * 
- * ChatGPT-style layout with:
- * - Header with title and clear-chat action
- * - Scrollable message area with auto-scroll
- * - Fixed bottom input bar
- * - Welcome state when empty
- * - Error state handling
- * - Typing indicator during AI response
+ * Production-grade layout:
+ * - Backend-only AI calls (no fallback)
+ * - Error toast with auto-dismiss
+ * - Disabled send while loading
+ * - No automatic retry loops
+ * - Firestore persistence via getDocs (no listeners)
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Trash2, AlertTriangle, MessageSquare, Zap, Shield, Target } from 'lucide-react';
+import { Trash2, AlertTriangle, MessageSquare, Zap, Shield, Target, X } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import { MessageBubble } from './MessageBubble';
 import { ChatInput } from './ChatInput';
@@ -39,6 +38,7 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Auto-scroll to bottom
     const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
@@ -47,7 +47,36 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
         });
     }, []);
 
-    // Load existing chat on mount
+    // Auto-dismiss error after 8 seconds
+    const showError = useCallback((msg: string) => {
+        setError(msg);
+        if (errorTimeoutRef.current) {
+            clearTimeout(errorTimeoutRef.current);
+        }
+        errorTimeoutRef.current = setTimeout(() => {
+            setError(null);
+            errorTimeoutRef.current = null;
+        }, 8000);
+    }, []);
+
+    const dismissError = useCallback(() => {
+        setError(null);
+        if (errorTimeoutRef.current) {
+            clearTimeout(errorTimeoutRef.current);
+            errorTimeoutRef.current = null;
+        }
+    }, []);
+
+    // Cleanup timeout on unmount
+    useEffect(() => {
+        return () => {
+            if (errorTimeoutRef.current) {
+                clearTimeout(errorTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    // Load existing chat on mount (getDocs, no listener)
     useEffect(() => {
         async function loadChat() {
             try {
@@ -61,7 +90,7 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
                 }
             } catch (err) {
                 console.error('Failed to load chat:', err);
-                // Continue without persistence
+                // Continue without persistence — chat still works in-memory
             } finally {
                 setInitialLoading(false);
             }
@@ -76,8 +105,10 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
         }
     }, [messages, loading, scrollToBottom]);
 
-    // Send message handler
+    // Send message handler — no retry, no fallback
     const handleSend = async (text: string) => {
+        if (loading) return; // Prevent double-send
+
         const userMessage: ChatMessage = {
             role: 'user',
             text,
@@ -99,7 +130,7 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
 
             setMessages((prev) => [...prev, assistantMessage]);
 
-            // Persist to Firestore
+            // Persist to Firestore (fire-and-forget, don't block UI)
             if (chatId) {
                 addMessagePair(chatId, userMessage, assistantMessage).catch((err) =>
                     console.error('Failed to persist messages:', err),
@@ -108,7 +139,7 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
         } catch (err) {
             const errorMsg =
                 err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.';
-            setError(errorMsg);
+            showError(errorMsg);
         } finally {
             setLoading(false);
         }
@@ -117,7 +148,7 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
     // Clear chat handler
     const handleClearChat = async () => {
         setMessages([]);
-        setError(null);
+        dismissError();
 
         if (chatId) {
             clearChatFirestore(chatId).catch((err) =>
@@ -135,7 +166,7 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
     ];
 
     const handleSuggestion = (text: string) => {
-        handleSend(text);
+        if (!loading) handleSend(text);
     };
 
     return (
@@ -160,6 +191,7 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
                             className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-gray-400 hover:text-red-400 hover:bg-navy-800 transition-colors duration-200"
                             title="Clear conversation"
                             aria-label="Clear conversation"
+                            disabled={loading}
                         >
                             <Trash2 size={14} strokeWidth={2} />
                             <span className="hidden sm:inline">Clear</span>
@@ -225,11 +257,13 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
                                     <button
                                         key={i}
                                         onClick={() => handleSuggestion(suggestion)}
+                                        disabled={loading}
                                         className={cn(
                                             'w-full text-left px-4 py-3 rounded-xl',
                                             'bg-navy-800/60 border border-navy-700 hover:border-primary-500/40',
                                             'text-sm text-gray-300 hover:text-gray-100',
                                             'transition-all duration-200 hover:bg-navy-800',
+                                            'disabled:opacity-50 disabled:cursor-not-allowed',
                                         )}
                                     >
                                         {suggestion}
@@ -255,7 +289,7 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
                         </div>
                     )}
 
-                    {/* Error state */}
+                    {/* Error toast */}
                     {error && (
                         <div className="mt-4 mx-auto max-w-md animate-fade-in">
                             <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-error-500/10 border border-error-500/20">
@@ -264,10 +298,17 @@ export const ChatLayout = ({ userId, sessionContext, className }: ChatLayoutProp
                                     strokeWidth={2}
                                     className="text-error-500 flex-shrink-0 mt-0.5"
                                 />
-                                <div>
+                                <div className="flex-1">
                                     <p className="text-sm text-error-500 font-medium">Error</p>
                                     <p className="text-xs text-gray-400 mt-0.5">{error}</p>
                                 </div>
+                                <button
+                                    onClick={dismissError}
+                                    className="flex-shrink-0 p-1 rounded hover:bg-error-500/10 transition-colors"
+                                    aria-label="Dismiss error"
+                                >
+                                    <X size={14} className="text-gray-500 hover:text-gray-300" />
+                                </button>
                             </div>
                         </div>
                     )}
