@@ -124,11 +124,17 @@ export default function LiveCoaching() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const [isRecording, setIsRecording] = useState(false);
+  const recordingMimeTypeRef = useRef<string>('video/webm');
+  const recordingFileExtRef = useRef<string>('webm');
+  const dataRequestIntervalRef = useRef<number | null>(null);
 
   // Session save states
   const [isSavingSession, setIsSavingSession] = useState(false);
   const [saveProgress, setSaveProgress] = useState<string>('');
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Camera facing mode for mobile
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
 
   const currentUser: User = {
     name: user?.displayName || user?.email?.split('@')[0] || 'User',
@@ -240,7 +246,7 @@ export default function LiveCoaching() {
             video: {
               width: { ideal: 1280 },
               height: { ideal: 720 },
-              facingMode: 'user'
+              facingMode: facingMode
             },
             audio: false
           });
@@ -335,22 +341,65 @@ export default function LiveCoaching() {
         console.log('🔐 Keeping camera alive - session in progress');
       }
     };
-  }, [isSessionActive]);
-
+  }, [isSessionActive, facingMode]);
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Switch between front and rear camera (mobile only)
+  const handleSwitchCamera = async () => {
+    if (!isSessionActive) return;
+    
+    console.log('Switching camera from', facingMode, 'to', facingMode === 'user' ? 'environment' : 'user');
+    
+    // Stop current stream
+    if (videoRef.current && videoRef.current.srcObject) {
+      const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+      tracks.forEach(track => track.stop());
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    
+    // Stop pose detection temporarily
+    isDetectionActiveRef.current = false;
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    
+    // Toggle facing mode
+    const newFacingMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(newFacingMode);
+    
+    // The useEffect will reinitialize with new facing mode
+  };
+
   // Start video recording
   const startVideoRecording = () => {
+    // Check if MediaRecorder is supported
+    if (!window.MediaRecorder) {
+      console.error('[VideoRecording] ❌ MediaRecorder API not supported on this browser');
+      alert('Video recording is not supported on this device/browser. Session data will be saved without video.');
+      return;
+    }
+
     // videoRef is most reliable source since it's set to srcObject during camera init
     const videoStream = videoRef.current?.srcObject as MediaStream | null;
     const referenceStream = streamRef.current;
     const stream = videoStream || referenceStream;
     
+    // Detect platform
+    const userAgent = navigator.userAgent.toLowerCase();
+    const isAndroid = userAgent.includes('android');
+    const isIOS = /iphone|ipad|ipod/.test(userAgent);
+    const isMobile = isAndroid || isIOS;
+    const platform = isAndroid ? 'Android' : isIOS ? 'iOS' : 'Desktop';
+    
     console.log('[VideoRecording] Starting video recording...');
+    console.log('[VideoRecording] Platform:', platform);
+    console.log('[VideoRecording] User Agent:', navigator.userAgent);
     console.log('[VideoRecording] videoRef stream:', !!videoStream, videoStream?.getTracks().length || 0, 'tracks');
     console.log('[VideoRecording] streamRef backup:', !!referenceStream);
     console.log('[VideoRecording] Using:', videoStream ? 'videoRef' : referenceStream ? 'streamRef' : 'NONE');
@@ -360,40 +409,215 @@ export default function LiveCoaching() {
       return;
     }
 
+    // Verify stream has active video tracks
+    const videoTracks = stream.getVideoTracks();
+    console.log('[VideoRecording] Video tracks found:', videoTracks.length);
+    
+    if (videoTracks.length === 0) {
+      console.error('[VideoRecording] ❌ No video tracks in stream');
+      return;
+    }
+    
+    videoTracks.forEach((track, idx) => {
+      console.log(`[VideoRecording] Track ${idx}:`, track.label, 'State:', track.readyState, 'Enabled:', track.enabled);
+    });
+    
+    const activeTrack = videoTracks.find(track => track.readyState === 'live');
+    if (!activeTrack) {
+      console.error('[VideoRecording] ❌ No active video tracks');
+      console.error('[VideoRecording] Track states:', videoTracks.map(t => t.readyState).join(', '));
+      return;
+    }
+    
+    console.log('[VideoRecording] ✅ Active video track found:', activeTrack.label);
+    console.log('[VideoRecording] Track settings:', activeTrack.getSettings());
+
     try {
       recordedChunksRef.current = [];
       console.log('[VideoRecording] Cleared recorded chunks');
       
-      const options = {
-        mimeType: 'video/webm;codecs=vp9',
-        videoBitsPerSecond: 2500000,
-      };
-
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options.mimeType = 'video/webm';
-        console.log('[VideoRecording] VP9 not supported, using fallback');
+      // Log supported codecs for debugging
+      console.log('[VideoRecording] === Codec Support Check ===');
+      const testCodecs = [
+        'video/webm',
+        'video/webm;codecs=vp8',
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=h264',
+        'video/mp4',
+        'video/mp4;codecs=avc1',
+        'video/mp4;codecs=h264',
+        'video/x-matroska;codecs=avc1',
+      ];
+      testCodecs.forEach(codec => {
+        const supported = MediaRecorder.isTypeSupported(codec);
+        console.log(`[VideoRecording] ${supported ? '✅' : '❌'} ${codec}`);
+      });
+      console.log('[VideoRecording] ========================');
+      
+      // Platform-optimized codec selection
+      let codecOptions: Array<{ mimeType: string; ext: string }> = [];
+      
+      if (isAndroid) {
+        // Android: Prioritize VP8/VP9 WebM
+        console.log('[VideoRecording] Using Android-optimized codec list');
+        codecOptions = [
+          { mimeType: 'video/webm;codecs=vp8', ext: 'webm' },
+          { mimeType: 'video/webm', ext: 'webm' },
+          { mimeType: 'video/webm;codecs=vp9', ext: 'webm' },
+          { mimeType: 'video/mp4', ext: 'mp4' },
+        ];
+      } else if (isIOS) {
+        // iOS: Prioritize H264 MP4
+        console.log('[VideoRecording] Using iOS-optimized codec list');
+        codecOptions = [
+          { mimeType: 'video/mp4', ext: 'mp4' },
+          { mimeType: 'video/mp4;codecs=h264', ext: 'mp4' },
+          { mimeType: 'video/webm', ext: 'webm' },
+        ];
+      } else {
+        // Desktop: Try VP9 first, then others
+        console.log('[VideoRecording] Using Desktop codec list');
+        codecOptions = [
+          { mimeType: 'video/webm;codecs=vp9', ext: 'webm' },
+          { mimeType: 'video/webm;codecs=vp8', ext: 'webm' },
+          { mimeType: 'video/webm', ext: 'webm' },
+          { mimeType: 'video/mp4', ext: 'mp4' },
+        ];
       }
 
-      const mediaRecorder = new MediaRecorder(stream, options);
+      let selectedCodec = { mimeType: '', ext: 'webm' };
+      
+      for (const codec of codecOptions) {
+        if (MediaRecorder.isTypeSupported(codec.mimeType)) {
+          selectedCodec = codec;
+          console.log('[VideoRecording] ✅ Codec supported:', codec.mimeType);
+          break;
+        } else {
+          console.log('[VideoRecording] ❌ Not supported:', codec.mimeType);
+        }
+      }
+
+      if (!selectedCodec.mimeType) {
+        console.error('[VideoRecording] ❌ No supported codecs found from list');
+        console.log('[VideoRecording] Attempting to create MediaRecorder without specifying codec');
+        selectedCodec = { mimeType: '', ext: 'webm' }; // Will try without mimeType
+      }
+
+      // Store mime type and extension for later use
+      recordingMimeTypeRef.current = selectedCodec.mimeType || 'video/webm';
+      recordingFileExtRef.current = selectedCodec.ext;
+
+      let mediaRecorder: MediaRecorder;
+      
+      // Try to create MediaRecorder with or without options
+      try {
+        if (selectedCodec.mimeType) {
+          const options: MediaRecorderOptions = {
+            mimeType: selectedCodec.mimeType,
+          };
+          
+          // Only add bitrate for desktop and specific codecs
+          if (!isMobile || !isAndroid) {
+            options.videoBitsPerSecond = 2500000;
+          } else {
+            console.log('[VideoRecording] Skipping bitrate setting for Android');
+          }
+          
+          console.log('[VideoRecording] Creating MediaRecorder with options:', options);
+          mediaRecorder = new MediaRecorder(stream, options);
+        } else {
+          console.log('[VideoRecording] Creating MediaRecorder without options (browser default)');
+          mediaRecorder = new MediaRecorder(stream);
+          // Store whatever the browser chose
+          if (mediaRecorder.mimeType) {
+            recordingMimeTypeRef.current = mediaRecorder.mimeType;
+            console.log('[VideoRecording] Browser selected:', mediaRecorder.mimeType);
+          }
+        }
+      } catch (createError) {
+        console.error('[VideoRecording] ❌ Failed to create with options, trying default:', createError);
+        mediaRecorder = new MediaRecorder(stream);
+        if (mediaRecorder.mimeType) {
+          recordingMimeTypeRef.current = mediaRecorder.mimeType;
+          console.log('[VideoRecording] Fallback successful with:', mediaRecorder.mimeType);
+        }
+      }
       
       mediaRecorder.ondataavailable = (event) => {
         console.log('[VideoRecording] 📦 Data chunk arrived:', (event.data.size / 1024).toFixed(1), 'KB');
         if (event.data && event.data.size > 0) {
           recordedChunksRef.current.push(event.data);
           console.log('[VideoRecording] Chunk #' + recordedChunksRef.current.length + ' stored');
+          console.log('[VideoRecording] Total data so far:', (recordedChunksRef.current.reduce((sum, chunk) => sum + chunk.size, 0) / 1024).toFixed(1), 'KB');
+        } else {
+          console.warn('[VideoRecording] ⚠️ Empty chunk received');
         }
       };
       
-      mediaRecorder.onerror = (event) => {
-        console.error('[VideoRecording] ❌ Error:', event.error);
+      mediaRecorder.onstart = () => {
+        console.log('[VideoRecording] ✅ Recording started successfully');
+      };
+      
+      mediaRecorder.onerror = (event: Event) => {
+        console.error('[VideoRecording] ❌ MediaRecorder error:', event);
+        const errorEvent = event as ErrorEvent;
+        if (errorEvent.error) {
+          console.error('[VideoRecording] Error details:', errorEvent.error);
+        }
+      };
+      
+      mediaRecorder.onstop = () => {
+        console.log('[VideoRecording] Recording stopped event fired');
       };
 
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(1000);
-      setIsRecording(true);
-      console.log('🎥 Recording started at', new Date().toLocaleTimeString());
+      
+      // Start recording - use different timeslice based on platform
+      try {
+        // Android sometimes has issues with timeslices, try without it or with shorter interval
+        if (isAndroid) {
+          console.log('[VideoRecording] Starting without timeslice (Android)');
+          mediaRecorder.start(); // No timeslice for Android
+        } else {
+          console.log('[VideoRecording] Starting with 1000ms timeslice');
+          mediaRecorder.start(1000);
+        }
+        
+        setIsRecording(true);
+        console.log('🎥 Recording started with', recordingMimeTypeRef.current, 'at', new Date().toLocaleTimeString());
+        
+        // For Android without timeslice, manually request data periodically
+        if (isAndroid) {
+          console.log('[VideoRecording] Setting up periodic data request for Android');
+          dataRequestIntervalRef.current = window.setInterval(() => {
+            if (mediaRecorder.state === 'recording') {
+              try {
+                mediaRecorder.requestData();
+                console.log('[VideoRecording] Requested data (periodic)');
+              } catch (e) {
+                console.warn('[VideoRecording] Failed to request data:', e);
+              }
+            }
+          }, 2000); // Request data every 2 seconds
+        }
+        
+        // Verify recording state after a short delay
+        setTimeout(() => {
+          if (mediaRecorder.state === 'recording') {
+            console.log('[VideoRecording] ✅ Verified: Recording is active');
+          } else {
+            console.error('[VideoRecording] ❌ Recording state:', mediaRecorder.state);
+            alert('Warning: Recording may not have started properly. Check console for details.');
+          }
+        }, 500);
+      } catch (startError) {
+        console.error('[VideoRecording] ❌ Failed to start MediaRecorder:', startError);
+        throw startError;
+      }
     } catch (error) {
-      console.error('❌ Failed to start:', error);
+      console.error('❌ Failed to start recording:', error);
+      console.error('[VideoRecording] Error details:', error instanceof Error ? error.message : error);
+      alert('Failed to start video recording. Session will be saved without video.');
     }
   };
 
@@ -402,33 +626,92 @@ export default function LiveCoaching() {
     return new Promise((resolve) => {
       const mediaRecorder = mediaRecorderRef.current;
       
+      // Clear periodic data request interval if it exists
+      if (dataRequestIntervalRef.current) {
+        clearInterval(dataRequestIntervalRef.current);
+        dataRequestIntervalRef.current = null;
+        console.log('[VideoRecording] Cleared periodic data request interval');
+      }
+      
       console.log('[VideoRecording] Stop requested...');
-      console.log('[VideoRecording] Chunks collected:', recordedChunksRef.current.length);
+      console.log('[VideoRecording] Chunks collected so far:', recordedChunksRef.current.length);
+      console.log('[VideoRecording] Recorder exists:', !!mediaRecorder);
       console.log('[VideoRecording] Recorder state:', mediaRecorder?.state);
       
       if (!mediaRecorder || mediaRecorder.state === 'inactive') {
         console.warn('[VideoRecording] ⚠️ Recorder not active');
-        resolve(null);
+        
+        // Check if we have chunks anyway (shouldn't happen but be safe)
+        if (recordedChunksRef.current.length > 0) {
+          console.log('[VideoRecording] Creating blob from existing chunks');
+          const mimeType = recordingMimeTypeRef.current;
+          const videoBlob = new Blob(recordedChunksRef.current, { type: mimeType });
+          console.log(`✅ Video blob created: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB (${mimeType})`);
+          resolve(videoBlob);
+        } else {
+          resolve(null);
+        }
         return;
       }
 
+      // Request any pending data before stopping (important for Android)
+      try {
+        console.log('[VideoRecording] Requesting final data...');
+        mediaRecorder.requestData();
+      } catch (requestError) {
+        console.warn('[VideoRecording] ⚠️ Could not request data:', requestError);
+      }
+
+      // Set timeout to prevent hanging
+      const timeout = setTimeout(() => {
+        console.error('[VideoRecording] ⏱️ Timeout waiting for stop event');
+        if (recordedChunksRef.current.length > 0) {
+          const mimeType = recordingMimeTypeRef.current;
+          const videoBlob = new Blob(recordedChunksRef.current, { type: mimeType });
+          console.log(`⚠️ Created blob despite timeout: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
+          setIsRecording(false);
+          resolve(videoBlob);
+        } else {
+          console.error('[VideoRecording] ❌ Timeout with no chunks - recording failed');
+          setIsRecording(false);
+          resolve(null);
+        }
+      }, 5000); // 5 second timeout
+
       mediaRecorder.onstop = () => {
+        clearTimeout(timeout);
         console.log('[VideoRecording] ⏹️  Recorder stopped');
         console.log('[VideoRecording] Total chunks:', recordedChunksRef.current.length);
         
         if (recordedChunksRef.current.length === 0) {
           console.warn('❌ NO CHUNKS RECORDED - recording may have failed');
+          console.warn('[VideoRecording] Possible causes: codec not supported, stream lost, or browser limitation');
+          setIsRecording(false);
           resolve(null);
           return;
         }
         
-        const videoBlob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+        // Calculate total size
+        const totalSize = recordedChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
+        console.log('[VideoRecording] Total data size:', (totalSize / 1024).toFixed(1), 'KB');
+        
+        // Use the mime type that was used for recording
+        const mimeType = recordingMimeTypeRef.current;
+        const videoBlob = new Blob(recordedChunksRef.current, { type: mimeType });
         setIsRecording(false);
-        console.log(`✅ Video blob created: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
+        console.log(`✅ Video blob created: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB (${mimeType})`);
         resolve(videoBlob);
       };
 
-      mediaRecorder.stop();
+      try {
+        mediaRecorder.stop();
+        console.log('[VideoRecording] Stop command sent');
+      } catch (stopError) {
+        clearTimeout(timeout);
+        console.error('[VideoRecording] ❌ Error stopping recorder:', stopError);
+        setIsRecording(false);
+        resolve(null);
+      }
     });
   };
 
@@ -454,6 +737,7 @@ export default function LiveCoaching() {
       // Step 2: Upload to R2 if video available
       if (videoBlob && videoBlob.size > 0) {
         console.log(`📹 Video blob size: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
+        console.log(`📹 Video type: ${videoBlob.type}`);
         setSaveProgress('Uploading session data to R2...');
         
         const sessionData = {
@@ -475,10 +759,11 @@ export default function LiveCoaching() {
 
           setSaveProgress('Uploading video to R2...');
           console.log('📹 Starting video upload to R2...');
+          const fileExt = recordingFileExtRef.current;
           const videoUrl = await uploadVideoToR2(
             completedSession.sessionId,
             videoBlob,
-            'session.webm'
+            `session.${fileExt}`
           );
           console.log('✅ Video uploaded:', videoUrl);
 
@@ -489,18 +774,31 @@ export default function LiveCoaching() {
             videoUrl,
           });
           console.log('✅ R2 URLs linked to session');
+          setSaveProgress('Session and video saved successfully! ✅');
 
         } catch (r2Error) {
           console.error('❌ R2 upload error:', r2Error);
-          setSaveError(`R2 upload failed: ${r2Error instanceof Error ? r2Error.message : 'Unknown error'}`);
-          throw r2Error;
+          console.error('❌ Error details:', r2Error instanceof Error ? r2Error.message : 'Unknown error');
+          
+          // Don't throw - session is already saved to Firestore
+          // Show warning instead of error
+          setSaveProgress('⚠️ Session saved but video upload failed. Session saved to Firestore.');
+          
+          // Show error in UI but don't prevent navigation
+          const errorMsg = r2Error instanceof Error ? r2Error.message : 'Unknown error';
+          console.warn(`⚠️ Continuing despite R2 error: ${errorMsg}`);
         }
       } else {
         console.warn('⚠️ No video blob to upload - session saved to Firestore only');
-        setSaveProgress('⚠️ Note: No video recorded for this session');
+        if (videoBlob === null) {
+          console.warn('[VideoRecording] Video blob is null - recording may have failed to start');
+        } else if (videoBlob.size === 0) {
+          console.warn('[VideoRecording] Video blob is empty (0 bytes)');
+        }
+        setSaveProgress('⚠️ Session saved without video (no video was recorded)');
       }
 
-      setSaveProgress('Session saved successfully! ✅');
+      // Always navigate to sessions after a delay, regardless of video upload success
       setTimeout(() => {
         setSaveProgress('');
         navigate('/sessions');
@@ -520,8 +818,16 @@ export default function LiveCoaching() {
       // Stop session
       setIsSessionActive(false);
       
+      console.log('[Session] Stopping session and video recording...');
+      
       // Stop video recording
       const videoBlob = await stopVideoRecording();
+      
+      console.log('[Session] Video blob received:', {
+        exists: !!videoBlob,
+        size: videoBlob ? `${(videoBlob.size / 1024 / 1024).toFixed(2)} MB` : 'N/A',
+        type: videoBlob?.type || 'N/A'
+      });
       
       // Save session
       await saveSession(videoBlob);
@@ -874,11 +1180,24 @@ export default function LiveCoaching() {
 
                 {/* Pose Detection Status */}
                 {!isInitializing && poseInitialized && (
-                  <div className="absolute top-20 left-4 z-10">
+                  <div className="absolute top-20 left-4 z-10 flex flex-col gap-2">
                     <Badge variant="success" className="bg-success-500/20 backdrop-blur border-success-500/30">
                       <Icons.Check size="sm" className="mr-1" />
                       AI Active
                     </Badge>
+                    
+                    {/* Recording Status Indicator */}
+                    {isRecording ? (
+                      <Badge variant="default" className="bg-danger-500/20 backdrop-blur border-danger-500/30">
+                        <div className="w-2 h-2 rounded-full bg-danger-500 mr-2 animate-pulse" />
+                        Recording
+                      </Badge>
+                    ) : (
+                      <Badge variant="default" className="bg-gray-500/20 backdrop-blur border-gray-500/30">
+                        <Icons.Camera size="sm" className="mr-1 text-gray-400" />
+                        No Video
+                      </Badge>
+                    )}
                   </div>
                 )}
 
@@ -897,6 +1216,18 @@ export default function LiveCoaching() {
                       <span className="text-white text-sm font-medium">LIVE</span>
                     </div>
                   </div>
+                </div>
+
+                {/* Camera Switch Button (Mobile Only) */}
+                <div className="absolute top-4 right-4 z-10 lg:hidden">
+                  <button
+                    onClick={handleSwitchCamera}
+                    className="p-3 bg-navy-900/80 backdrop-blur rounded-full border border-primary-400/30 text-white hover:bg-navy-800 hover:border-primary-400 transition-all shadow-lg active:scale-95"
+                    aria-label="Switch Camera"
+                    title={facingMode === 'user' ? 'Switch to Rear Camera' : 'Switch to Front Camera'}
+                  >
+                    <Icons.RefreshCw size="md" />
+                  </button>
                 </div>
 
                 {/* Floating Metrics (Mobile) */}

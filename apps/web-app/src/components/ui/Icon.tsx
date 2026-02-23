@@ -39,6 +39,7 @@ import {
   Eye,
   EyeOff,
   MessageCircle,
+  RefreshCw,
   type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
@@ -80,6 +81,7 @@ export const Icons = {
   Settings: createIcon(Settings),
   LogOut: createIcon(LogOut),
   MessageCircle: createIcon(MessageCircle),
+  RefreshCw: createIcon(RefreshCw),
   
   // Actions
   Camera: createIcon(Camera),
@@ -155,6 +157,7 @@ export {
   Eye,
   EyeOff,
   MessageCircle,
+  RefreshCw,
 };
 
 // Default export for convenience

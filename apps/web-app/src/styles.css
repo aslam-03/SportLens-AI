@@ -121,6 +121,35 @@
   .container-custom {
     @apply w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
   }
+
+  /* Thin scrollbar for chat */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(107, 114, 128, 0.3);
+    border-radius: 9999px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: rgba(107, 114, 128, 0.5);
+  }
+
+  /* Dark scrollbar for chat message area */
+  .dark .custom-scrollbar::-webkit-scrollbar-track,
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .dark .custom-scrollbar::-webkit-scrollbar-thumb,
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-navy-700 rounded-full;
+  }
 }
 
 @layer utilities {

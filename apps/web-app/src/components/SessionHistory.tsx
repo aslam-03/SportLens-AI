@@ -25,7 +25,7 @@ export default function SessionHistory() {
   const [firestoreAvailable, setFirestoreAvailable] = useState(false);
   const [dataSource, setDataSource] = useState<'local' | 'firestore'>('local');
   const [viewingReport, setViewingReport] = useState<Session | null>(null);
-  
+
   // Get authenticated user
   const { user } = useAuth();
 
@@ -38,28 +38,28 @@ export default function SessionHistory() {
     setLoadingFromFirestore(true);
     try {
       const uid = user?.uid || null;
-      
+
       // Use sessionApi which handles fallback automatically
       const result = await fetchSessions(
         uid,
         filter === 'all' ? undefined : (filter as 'fitness' | 'cricket')
       );
-      
+
       setSessions(result.sessions);
       setFirestoreAvailable(result.source === 'firestore');
       setDataSource(result.source);
-      
+
       console.log(`📚 ${result.message} (source: ${result.source})`);
-      
+
       // If we have pending sessions and user is authenticated, try to sync them
       if (uid && result.source === 'firestore') {
         const allSessions = SessionStorage.getAllSessions();
         const pendingSessions = allSessions.filter(s => s.syncStatus === 'pending');
-        
+
         if (pendingSessions.length > 0) {
           console.log(`🔄 Attempting to sync ${pendingSessions.length} pending sessions...`);
           const syncResult = await syncPendingSessions(uid);
-          
+
           if (syncResult.succeeded > 0) {
             console.log(`✅ Synced ${syncResult.succeeded} pending sessions`);
             // Reload to show updated sync status
@@ -125,12 +125,12 @@ export default function SessionHistory() {
   };
 
   return (
-    <div style={{ 
-      minHeight: "100vh", 
-      background: "#0b0c10", 
-      color: "#e5faff", 
-      padding: "24px", 
-      fontFamily: "Inter, system-ui, sans-serif" 
+    <div style={{
+      minHeight: "100vh",
+      background: "#0b0c10",
+      color: "#e5faff",
+      padding: "24px",
+      fontFamily: "Inter, system-ui, sans-serif"
     }}>
       {/* Header */}
       <div style={{ maxWidth: "900px", margin: "0 auto" }}>
@@ -142,11 +142,11 @@ export default function SessionHistory() {
         </p>
 
         {/* Data Source Indicator */}
-        <div style={{ 
-          marginBottom: "16px", 
-          padding: "10px 14px", 
-          background: dataSource === 'backend' ? "#10b98110" : "#f59e0b10",
-          border: `1px solid ${dataSource === 'backend' ? '#10b981' : '#f59e0b'}`,
+        <div style={{
+          marginBottom: "16px",
+          padding: "10px 14px",
+          background: dataSource === 'firestore' ? "#10b98110" : "#f59e0b10",
+          border: `1px solid ${dataSource === 'firestore' ? '#10b981' : '#f59e0b'}`,
           borderRadius: "6px",
           display: "flex",
           alignItems: "center",
@@ -157,8 +157,8 @@ export default function SessionHistory() {
             {dataSource === 'firestore' ? '☁️' : '💾'}
           </span>
           <span style={{ color: dataSource === 'firestore' ? '#10b981' : '#f59e0b', fontWeight: 600 }}>
-            {loadingFromFirestore ? 'Checking Firestore...' : 
-             dataSource === 'firestore' ? 'Connected to Firestore' : 'Offline mode (local storage)'}
+            {loadingFromFirestore ? 'Checking Firestore...' :
+              dataSource === 'firestore' ? 'Connected to Firestore' : 'Offline mode (local storage)'}
           </span>
           {!firestoreAvailable && !loadingFromFirestore && (
             <span style={{ color: "#6b7280", fontSize: "11px", marginLeft: "auto" }}>
@@ -168,52 +168,52 @@ export default function SessionHistory() {
         </div>
 
         {/* Filter Buttons */}
-        <div style={{ 
-          display: "flex", 
-          gap: "8px", 
+        <div style={{
+          display: "flex",
+          gap: "8px",
           marginBottom: "16px",
           flexWrap: "wrap",
           alignItems: "center"
         }}>
-          <button 
+          <button
             onClick={() => setFilter('all')}
-            style={{ 
-              padding: "6px 12px", 
-              background: filter === 'all' ? "#0ad4ff" : "#1e3a4c", 
+            style={{
+              padding: "6px 12px",
+              background: filter === 'all' ? "#0ad4ff" : "#1e3a4c",
               color: filter === 'all' ? "#001018" : "#7dd3fc",
-              border: "none", 
-              borderRadius: "6px", 
-              fontWeight: 700, 
+              border: "none",
+              borderRadius: "6px",
+              fontWeight: 700,
               cursor: "pointer",
               fontSize: "12px",
             }}
           >
             All ({sessions.length})
           </button>
-          <button 
+          <button
             onClick={() => setFilter('fitness')}
-            style={{ 
-              padding: "6px 12px", 
-              background: filter === 'fitness' ? "#0ad4ff" : "#1e3a4c", 
+            style={{
+              padding: "6px 12px",
+              background: filter === 'fitness' ? "#0ad4ff" : "#1e3a4c",
               color: filter === 'fitness' ? "#001018" : "#7dd3fc",
-              border: "none", 
-              borderRadius: "6px", 
-              fontWeight: 700, 
+              border: "none",
+              borderRadius: "6px",
+              fontWeight: 700,
               cursor: "pointer",
               fontSize: "12px",
             }}
           >
             Fitness ({sessions.filter(s => s.activityType === 'fitness').length})
           </button>
-          <button 
+          <button
             onClick={() => setFilter('cricket')}
-            style={{ 
-              padding: "6px 12px", 
-              background: filter === 'cricket' ? "#0ad4ff" : "#1e3a4c", 
+            style={{
+              padding: "6px 12px",
+              background: filter === 'cricket' ? "#0ad4ff" : "#1e3a4c",
               color: filter === 'cricket' ? "#001018" : "#7dd3fc",
-              border: "none", 
-              borderRadius: "6px", 
-              fontWeight: 700, 
+              border: "none",
+              borderRadius: "6px",
+              fontWeight: 700,
               cursor: "pointer",
               fontSize: "12px",
             }}
@@ -222,30 +222,30 @@ export default function SessionHistory() {
           </button>
 
           <div style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
-            <button 
+            <button
               onClick={loadSessions}
-              style={{ 
-                padding: "6px 12px", 
-                background: "#1e3a4c", 
+              style={{
+                padding: "6px 12px",
+                background: "#1e3a4c",
                 color: "#7dd3fc",
-                border: "none", 
-                borderRadius: "6px", 
-                fontWeight: 700, 
+                border: "none",
+                borderRadius: "6px",
+                fontWeight: 700,
                 cursor: "pointer",
                 fontSize: "12px",
               }}
             >
               🔄 Refresh
             </button>
-            <button 
+            <button
               onClick={handleClearAll}
-              style={{ 
-                padding: "6px 12px", 
-                background: "#ef4444", 
+              style={{
+                padding: "6px 12px",
+                background: "#ef4444",
                 color: "#fff",
-                border: "none", 
-                borderRadius: "6px", 
-                fontWeight: 700, 
+                border: "none",
+                borderRadius: "6px",
+                fontWeight: 700,
                 cursor: "pointer",
                 fontSize: "12px",
               }}
@@ -257,12 +257,12 @@ export default function SessionHistory() {
 
         {/* Empty State */}
         {filteredSessions.length === 0 && (
-          <div style={{ 
-            padding: "48px 24px", 
-            textAlign: "center", 
-            background: "#0f1419", 
-            border: "1px solid #1e3a4c", 
-            borderRadius: "8px" 
+          <div style={{
+            padding: "48px 24px",
+            textAlign: "center",
+            background: "#0f1419",
+            border: "1px solid #1e3a4c",
+            borderRadius: "8px"
           }}>
             <div style={{ fontSize: "48px", marginBottom: "16px" }}>📭</div>
             <p style={{ fontSize: "16px", fontWeight: 600, color: "#7dd3fc", marginBottom: "8px" }}>
@@ -281,20 +281,20 @@ export default function SessionHistory() {
             const scoreColor = getScoreColor(session.metrics.performanceScore);
 
             return (
-              <div 
-                key={session.sessionId} 
-                style={{ 
-                  background: "#0f1419", 
-                  border: "1px solid #1e3a4c", 
+              <div
+                key={session.sessionId}
+                style={{
+                  background: "#0f1419",
+                  border: "1px solid #1e3a4c",
                   borderRadius: "8px",
                   overflow: "hidden"
                 }}
               >
                 {/* Card Header (Always Visible) */}
-                <div 
+                <div
                   onClick={() => toggleExpand(session.sessionId)}
-                  style={{ 
-                    padding: "16px", 
+                  style={{
+                    padding: "16px",
                     cursor: "pointer",
                     display: "flex",
                     justifyContent: "space-between",
@@ -315,10 +315,10 @@ export default function SessionHistory() {
                 >
                   <div style={{ flex: 1 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
-                      <span style={{ 
-                        fontSize: "11px", 
-                        fontWeight: 700, 
-                        padding: "4px 8px", 
+                      <span style={{
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        padding: "4px 8px",
                         background: session.activityType === 'fitness' ? "#10b98120" : "#f59e0b20",
                         color: session.activityType === 'fitness' ? "#10b981" : "#f59e0b",
                         borderRadius: "4px",
@@ -350,9 +350,9 @@ export default function SessionHistory() {
                   </div>
 
                   {/* Performance Score */}
-                  <div style={{ 
-                    fontSize: "32px", 
-                    fontWeight: 700, 
+                  <div style={{
+                    fontSize: "32px",
+                    fontWeight: 700,
                     color: scoreColor,
                     marginRight: "16px"
                   }}>
@@ -360,8 +360,8 @@ export default function SessionHistory() {
                   </div>
 
                   {/* Expand Icon */}
-                  <div style={{ 
-                    fontSize: "20px", 
+                  <div style={{
+                    fontSize: "20px",
                     color: "#7dd3fc",
                     transition: "transform 0.2s",
                     transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)"
@@ -372,8 +372,8 @@ export default function SessionHistory() {
 
                 {/* Expanded Details */}
                 {isExpanded && (
-                  <div style={{ 
-                    padding: "0 16px 16px 16px", 
+                  <div style={{
+                    padding: "0 16px 16px 16px",
                     borderTop: "1px solid #1e3a4c",
                     background: "#0b0c10"
                   }}>
@@ -387,8 +387,8 @@ export default function SessionHistory() {
                           <div style={{ fontSize: "12px" }}>
                             <strong style={{ color: "#7dd3fc" }}>Left Knee:</strong>
                             <div style={{ color: "#e5faff", marginTop: "4px" }}>
-                              Avg: {session.metrics.biomechanics.leftKnee.avg}° | 
-                              Min: {session.metrics.biomechanics.leftKnee.min}° | 
+                              Avg: {session.metrics.biomechanics.leftKnee.avg}° |
+                              Min: {session.metrics.biomechanics.leftKnee.min}° |
                               Max: {session.metrics.biomechanics.leftKnee.max}°
                             </div>
                           </div>
@@ -397,8 +397,8 @@ export default function SessionHistory() {
                           <div style={{ fontSize: "12px" }}>
                             <strong style={{ color: "#7dd3fc" }}>Right Knee:</strong>
                             <div style={{ color: "#e5faff", marginTop: "4px" }}>
-                              Avg: {session.metrics.biomechanics.rightKnee.avg}° | 
-                              Min: {session.metrics.biomechanics.rightKnee.min}° | 
+                              Avg: {session.metrics.biomechanics.rightKnee.avg}° |
+                              Min: {session.metrics.biomechanics.rightKnee.min}° |
                               Max: {session.metrics.biomechanics.rightKnee.max}°
                             </div>
                           </div>
@@ -407,8 +407,8 @@ export default function SessionHistory() {
                           <div style={{ fontSize: "12px" }}>
                             <strong style={{ color: "#7dd3fc" }}>Left Hip:</strong>
                             <div style={{ color: "#e5faff", marginTop: "4px" }}>
-                              Avg: {session.metrics.biomechanics.leftHip.avg}° | 
-                              Min: {session.metrics.biomechanics.leftHip.min}° | 
+                              Avg: {session.metrics.biomechanics.leftHip.avg}° |
+                              Min: {session.metrics.biomechanics.leftHip.min}° |
                               Max: {session.metrics.biomechanics.leftHip.max}°
                             </div>
                           </div>
@@ -417,8 +417,8 @@ export default function SessionHistory() {
                           <div style={{ fontSize: "12px" }}>
                             <strong style={{ color: "#7dd3fc" }}>Right Hip:</strong>
                             <div style={{ color: "#e5faff", marginTop: "4px" }}>
-                              Avg: {session.metrics.biomechanics.rightHip.avg}° | 
-                              Min: {session.metrics.biomechanics.rightHip.min}° | 
+                              Avg: {session.metrics.biomechanics.rightHip.avg}° |
+                              Min: {session.metrics.biomechanics.rightHip.min}° |
                               Max: {session.metrics.biomechanics.rightHip.max}°
                             </div>
                           </div>
@@ -437,10 +437,10 @@ export default function SessionHistory() {
                             .sort(([, a], [, b]) => b - a) // Sort by count descending
                             .slice(0, 5) // Show top 5
                             .map(([ruleId, count]) => (
-                              <div 
-                                key={ruleId} 
-                                style={{ 
-                                  fontSize: "12px", 
+                              <div
+                                key={ruleId}
+                                style={{
+                                  fontSize: "12px",
                                   color: "#e5faff",
                                   display: "flex",
                                   justifyContent: "space-between",
@@ -469,36 +469,36 @@ export default function SessionHistory() {
 
                     {/* Actions */}
                     <div style={{ marginTop: "16px", display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                      <button 
+                      <button
                         onClick={(e) => {
                           e.stopPropagation();
                           setViewingReport(session);
                         }}
-                        style={{ 
-                          padding: "6px 12px", 
-                          background: "#0ad4ff", 
+                        style={{
+                          padding: "6px 12px",
+                          background: "#0ad4ff",
                           color: "#001018",
-                          border: "none", 
-                          borderRadius: "6px", 
-                          fontWeight: 700, 
+                          border: "none",
+                          borderRadius: "6px",
+                          fontWeight: 700,
                           cursor: "pointer",
                           fontSize: "11px",
                         }}
                       >
                         📊 View Report
                       </button>
-                      <button 
+                      <button
                         onClick={(e) => {
                           e.stopPropagation();
                           handleDelete(session.sessionId);
                         }}
-                        style={{ 
-                          padding: "6px 12px", 
-                          background: "#ef4444", 
+                        style={{
+                          padding: "6px 12px",
+                          background: "#ef4444",
                           color: "#fff",
-                          border: "none", 
-                          borderRadius: "6px", 
-                          fontWeight: 700, 
+                          border: "none",
+                          borderRadius: "6px",
+                          fontWeight: 700,
                           cursor: "pointer",
                           fontSize: "11px",
                         }}
@@ -514,16 +514,16 @@ export default function SessionHistory() {
         </div>
 
         {/* Storage Info */}
-        <div style={{ 
-          marginTop: "24px", 
-          padding: "12px", 
-          background: "#0f1419", 
-          border: "1px solid #1e3a4c", 
+        <div style={{
+          marginTop: "24px",
+          padding: "12px",
+          background: "#0f1419",
+          border: "1px solid #1e3a4c",
           borderRadius: "8px",
           fontSize: "12px",
           color: "#6b7280"
         }}>
-          <strong style={{ color: "#7dd3fc" }}>Storage:</strong> {SessionStorage.getStats().estimatedSizeKB} KB used | 
+          <strong style={{ color: "#7dd3fc" }}>Storage:</strong> {SessionStorage.getStats().estimatedSizeKB} KB used |
           {" "}{sessions.length} total sessions ({SessionStorage.getStats().fitnessSessions} fitness, {SessionStorage.getStats().cricketSessions} cricket)
         </div>
       </div>

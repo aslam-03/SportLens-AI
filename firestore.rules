@@ -89,6 +89,26 @@ service cloud.firestore {
     }
     
     // ============================================================
+    // CHATS COLLECTION
+    // ============================================================
+    match /chats/{chatId} {
+      // Allow users to read their own chats
+      allow read: if isAuthenticated() && isOwner(resource.data.userId);
+      
+      // Allow users to create chats (must set userId = auth.uid)
+      allow create: if isAuthenticated() && hasValidUserId();
+      
+      // Allow users to update their own chats
+      // Note: userId cannot be changed after creation
+      allow update: if isAuthenticated() 
+                    && isOwner(resource.data.userId)
+                    && request.resource.data.userId == resource.data.userId;
+      
+      // Allow users to delete their own chats
+      allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+    }
+    
+    // ============================================================
     // FUTURE: Admin Access (Commented Out)
     // ============================================================
     // Uncomment when you add admin functionality

@@ -10,7 +10,9 @@ import { cn } from '../../utils/cn';
 
 interface AvatarProps {
   src?: string;
+  imageUrl?: string; // Alias for src
   alt?: string;
+  name?: string; // Display name (used for alt fallback)
   initials?: string;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
@@ -25,12 +27,16 @@ const sizeStyles = {
 
 export const Avatar = ({
   src,
-  alt = 'User avatar',
+  imageUrl,
+  alt,
+  name,
   initials = '?',
   size = 'md',
   className,
   onClick,
 }: AvatarProps) => {
+  const imgSrc = src || imageUrl;
+  const altText = alt || name || 'User avatar';
   return (
     <button
       onClick={onClick}
@@ -44,13 +50,13 @@ export const Avatar = ({
         onClick && 'cursor-pointer hover:from-primary-700 hover:to-primary-800 transition-all',
         className
       )}
-      title={alt}
+      title={altText}
       type="button"
     >
-      {src ? (
+      {imgSrc ? (
         <img
-          src={src}
-          alt={alt}
+          src={imgSrc}
+          alt={altText}
           className={cn(
             'w-full h-full rounded-full object-cover'
           )}
