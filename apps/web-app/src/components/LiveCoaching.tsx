@@ -11,6 +11,8 @@ import { sendSession } from "../services/sessionApi";
 import { useAuth } from "../hooks/useAuth";
 import { uploadKeypointsToR2, uploadVideoToR2 } from "../services/r2UploadService";
 import { updateSessionR2Objects } from "../services/firestoreSessionService";
+import { ActivityDetector, ActivityStatus } from "../engine/activityDetector";
+import { DetectionPipeline, PipelineStatus } from "../engine/detectionPipeline";
 
 interface CameraStatus {
   state: "idle" | "requesting" | "active" | "blocked" | "unsupported" | "stopped";
@@ -46,6 +48,20 @@ export default function LiveCoaching() {
   const [sessionDuration, setSessionDuration] = useState(0);
   const sessionAggregatorRef = useRef<SessionAggregator>(new SessionAggregator());
   
+  // Activity detection
+  const activityDetectorRef = useRef<ActivityDetector>(new ActivityDetector('fitness'));
+  const [detectionStatus, setDetectionStatus] = useState<ActivityStatus>('idle');
+  const [detectionMessage, setDetectionMessage] = useState<string>('');
+  const [detectionSeverity, setDetectionSeverity] = useState<'info' | 'warning' | 'error'>('info');
+  const [liveScore, setLiveScore] = useState<number | null>(null);
+
+  // Detection pipeline (COCO-SSD + confidence + smoothing + tracking + stability)
+  const pipelineRef = useRef<DetectionPipeline>(new DetectionPipeline());
+  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>('initializing');
+  const [pipelineMessage, setPipelineMessage] = useState<string>('Initializing detection...');
+  const [pipelineReady, setPipelineReady] = useState(false);
+  const [personCount, setPersonCount] = useState(0);
+
   // Video recording state
   const [isRecording, setIsRecording] = useState(false);
 
@@ -59,11 +75,12 @@ export default function LiveCoaching() {
   // Get authenticated user
   const { user } = useAuth();
 
-  // Load rules based on selected activity
+  // Load rules + activity detector when activity changes
   useEffect(() => {
     const rules = activity === 'fitness' ? FITNESS_RULES : CRICKET_BOWLING_RULES;
     ruleEngineRef.current.clearRules();
     ruleEngineRef.current.addRules(rules);
+    activityDetectorRef.current.setActivity(activity);
     console.log(`✅ Loaded ${rules.length} ${activity} rules`);
   }, [activity]);
 
@@ -101,8 +118,12 @@ export default function LiveCoaching() {
 
     try {
       console.log('STEP 1️⃣ getUserMedia request starting');
+      // Default to rear camera on mobile, front camera on desktop
+      const ua = navigator.userAgent.toLowerCase();
+      const isMobile = /android|iphone|ipad|ipod|mobile/.test(ua);
+      const preferredFacing = isMobile ? 'environment' : 'user';
       const constraints = {
-        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: preferredFacing, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -168,14 +189,6 @@ export default function LiveCoaching() {
             canvasRef.current.width = targetWidth;
             canvasRef.current.height = targetHeight;
             console.log(`✅ Canvas synced to: ${canvasRef.current.width}x${canvasRef.current.height}`);
-            
-            // Draw a test rect to verify canvas is working
-            const ctx = canvasRef.current.getContext('2d');
-            if (ctx) {
-              ctx.fillStyle = 'rgba(7, 207, 246, 0.2)';
-              ctx.fillRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-              console.log('✅ Test rect drawn on canvas');
-            }
           }
 
           try {
@@ -191,55 +204,138 @@ export default function LiveCoaching() {
             if (videoRef.current && !poseInitializedRef.current) {
               console.log('STEP 7️⃣ Initializing MediaPipe Pose...');
               let detectionCount = 0;
-              await initializePose(videoRef.current, (results: PoseLandmarks) => {
-                // Callback when pose is detected
+              await initializePose(videoRef.current, async (results: PoseLandmarks) => {
                 detectionCount++;
-                if (detectionCount % 30 === 0) {
-                  console.log(`🎯 Pose detected: ${results.landmarks?.length || 0} landmarks`);
+                const video = videoRef.current;
+
+                // ── 0. Run detection pipeline (COCO-SSD + confidence + smoothing + tracking + stability) ──
+                let pipelineResult;
+                if (pipelineRef.current.ready && video) {
+                  pipelineResult = pipelineRef.current.processSync(results);
+                  setPipelineStatus(pipelineResult.status);
+                  setPipelineMessage(pipelineResult.message);
+                  setPersonCount(pipelineResult.personCount);
+
+                  // Run COCO-SSD async every few frames (lightweight — doesn't block)
+                  if (detectionCount % 3 === 0 && video) {
+                    pipelineRef.current.process(video, results).then(asyncResult => {
+                      setPipelineStatus(asyncResult.status);
+                      setPipelineMessage(asyncResult.message);
+                      setPersonCount(asyncResult.personCount);
+                    }).catch(() => {});
+                  }
+                } else {
+                  // Pipeline not ready yet — use raw results with basic checks
+                  pipelineResult = null;
                 }
 
-                // Calculate and smooth biomechanics angles
-                const rawFrame = calculateBiomechanics(results, 0.3);
+                // Use pipeline-smoothed landmarks if available, otherwise raw
+                const effectiveResults: PoseLandmarks = pipelineResult?.poseLandmarks ?? results;
+                const shouldProceed = pipelineResult ? pipelineResult.shouldScore : true;
+                // When pipeline is null (COCO-SSD failed), do a basic confidence gate
+                let shouldDraw: boolean;
+                if (pipelineResult) {
+                  shouldDraw = pipelineResult.shouldDrawSkeleton;
+                } else {
+                  const rawLm = results?.landmarks ?? [];
+                  if (rawLm.length > 0) {
+                    const avgVis = rawLm.reduce((s: number, l: any) => s + (l.visibility ?? 0), 0) / rawLm.length;
+                    shouldDraw = avgVis > 0.35;
+                  } else {
+                    shouldDraw = false;
+                  }
+                }
+
+                // ── 1. Biomechanics calculation ──────────────────────────
+                const rawFrame = calculateBiomechanics(effectiveResults, 0.3);
                 const smoothedFrame = angleSmootherRef.current.smoothFrame(rawFrame);
                 setBiomechanics(smoothedFrame);
 
-                // Add frame to session aggregator if session is active
-                if (sessionAggregatorRef.current.isActive()) {
-                  sessionAggregatorRef.current.addFrame(smoothedFrame);
-                }
-
-                // Evaluate rules and get violations
+                // ── 2. Rule engine ───────────────────────────────────────
                 const currentViolations = ruleEngineRef.current.evaluate(smoothedFrame);
                 setViolations(currentViolations);
-                
-                // Add violations to session aggregator if session is active
-                if (sessionAggregatorRef.current.isActive() && currentViolations.length > 0) {
-                  sessionAggregatorRef.current.addViolations(currentViolations);
-                }
-                
-                if (!canvasEnabledRef.current) {
-                  if (detectionCount % 30 === 0) {
-                    console.log('ℹ️ Canvas disabled; skipping draw');
-                  }
-                  return;
+
+                // ── 3. Activity detection ────────────────────────────────
+                const actResult = activityDetectorRef.current.evaluate(
+                  smoothedFrame,
+                  effectiveResults.landmarks ?? null,
+                  currentViolations
+                );
+
+                // Override activity detection with pipeline status
+                if (pipelineResult && pipelineResult.status !== 'ready') {
+                  // Pipeline says not ready — override activity detection
+                  setDetectionStatus(pipelineResult.status === 'no_human' ? 'no_human' : 'idle');
+                  setDetectionMessage(pipelineResult.message);
+                  setDetectionSeverity(pipelineResult.severity);
+                } else {
+                  setDetectionStatus(actResult.status);
+                  setDetectionMessage(actResult.message);
+                  setDetectionSeverity(actResult.severity);
                 }
 
-                if (canvasRef.current && results && results.landmarks && results.landmarks.length > 0) {
-                  drawSkeleton(canvasRef.current, results, {
+                // ── 4. Session aggregation ───────────────────────────────
+                if (sessionAggregatorRef.current.isActive() && shouldProceed) {
+                  // Only add biomechanics frames when human is present and pipeline ready
+                  if (actResult.status !== 'no_human') {
+                    sessionAggregatorRef.current.addFrame(smoothedFrame);
+                  }
+                  // Always log violations (they fire only when performing)
+                  if (currentViolations.length > 0) {
+                    sessionAggregatorRef.current.addViolations(currentViolations);
+                  }
+                  // Record frame quality for score calculation
+                  sessionAggregatorRef.current.addFrameQuality(
+                    actResult.status,
+                    actResult.frameQualityScore
+                  );
+                  // Update live score every frame
+                  setLiveScore(sessionAggregatorRef.current.getLiveScore());
+                }
+
+                // ── 5. Canvas skeleton drawing ───────────────────────────
+                if (!canvasEnabledRef.current) return;
+
+                // Always clear canvas first — ensures no stale skeleton lingers
+                if (canvasRef.current) {
+                  const ctx2d = canvasRef.current.getContext('2d');
+                  ctx2d?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+                }
+
+                // Only draw skeleton when pipeline says it's OK AND real human detected
+                if (
+                  canvasRef.current &&
+                  effectiveResults?.landmarks &&
+                  effectiveResults.landmarks.length > 0 &&
+                  shouldDraw &&
+                  actResult.status !== 'no_human'
+                ) {
+                  drawSkeleton(canvasRef.current, effectiveResults, {
                     jointRadius: 5,
                     lineWidth: 2,
                     jointColor: '#07cff6',
                     lineColor: '#194162',
                     visibilityThreshold: 0.5,
                   });
-                  
-                  if (detectionCount % 30 === 0) {
-                    console.log(`✏️ Skeleton drawn on canvas (${canvasRef.current.width}x${canvasRef.current.height})`);
-                  }
                 }
               });
               poseInitializedRef.current = true;
               console.log('STEP 8️⃣ Pose initialized, starting detection loop');
+
+              // Initialize COCO-SSD detection pipeline
+              console.log('STEP 9️⃣ Initializing COCO-SSD detection pipeline...');
+              try {
+                await pipelineRef.current.initialize();
+                setPipelineReady(true);
+                setPipelineStatus('ready');
+                setPipelineMessage('');
+                console.log('✅ Detection pipeline ready (COCO-SSD + confidence + tracking + stability)');
+              } catch (pipelineErr) {
+                console.warn('⚠️ COCO-SSD pipeline failed to load — falling back to pose-only detection:', pipelineErr);
+                // Continue without pipeline — the system still works with ActivityDetector
+                setPipelineMessage('Person detection unavailable — using pose-only mode.');
+              }
+
               startPoseLoop();
               console.log('✅ Final verification: permission granted, video track detected, srcObject set, metadata loaded, video.play succeeded. Video should be visible.');
             }
@@ -325,6 +421,11 @@ export default function LiveCoaching() {
       closePose();
       poseInitializedRef.current = false;
     }
+
+    // Reset detection pipeline
+    pipelineRef.current.reset();
+    setPipelineStatus('initializing');
+    setPipelineReady(false);
   };
 
   // Start video recording
@@ -333,21 +434,22 @@ export default function LiveCoaching() {
       console.warn('[VideoRecording] No stream available');
       return;
     }
-
     try {
-      // Reset recorded chunks
       recordedChunksRef.current = [];
 
-      // Create MediaRecorder with WebM format
-      const options = {
-        mimeType: 'video/webm;codecs=vp9',
-        videoBitsPerSecond: 2500000, // 2.5 Mbps for good quality
-      };
+      // Ordered preference list — picks first supported MIME type
+      const mimeTypeCandidates = [
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+        'video/mp4;codecs=h264',
+        'video/mp4',
+      ];
+      const mimeType = mimeTypeCandidates.find(m => MediaRecorder.isTypeSupported(m)) ?? '';
+      console.log(`[VideoRecording] MIME: "${mimeType || 'browser default'}"`);
 
-      // Fallback if vp9 not supported
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        options.mimeType = 'video/webm';
-      }
+      const options: MediaRecorderOptions = { videoBitsPerSecond: 2_000_000 };
+      if (mimeType) options.mimeType = mimeType;
 
       const mediaRecorder = new MediaRecorder(streamRef.current, options);
 
@@ -356,26 +458,13 @@ export default function LiveCoaching() {
           recordedChunksRef.current.push(event.data);
         }
       };
-
-      mediaRecorder.onstart = () => {
-        console.log('🎥 Video recording started');
-        setIsRecording(true);
-      };
-
-      mediaRecorder.onstop = () => {
-        console.log('🎥 Video recording stopped');
-        setIsRecording(false);
-      };
-
-      mediaRecorder.onerror = (event) => {
-        console.error('🎥 MediaRecorder error:', event);
-        setIsRecording(false);
-      };
+      mediaRecorder.onstart = () => { console.log('[VideoRecording] Started'); setIsRecording(true); };
+      mediaRecorder.onerror = (event) => { console.error('[VideoRecording] Error:', event); setIsRecording(false); };
 
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(1000); // Collect data every 1 second
+      mediaRecorder.start(500); // chunk every 500ms so short sessions have data
     } catch (error) {
-      console.error('Failed to start video recording:', error);
+      console.error('[VideoRecording] Failed to start:', error);
     }
   };
 
@@ -383,29 +472,33 @@ export default function LiveCoaching() {
   const stopVideoRecording = (): Promise<Blob | null> => {
     return new Promise((resolve) => {
       const mediaRecorder = mediaRecorderRef.current;
-      
       if (!mediaRecorder || mediaRecorder.state === 'inactive') {
-        console.warn('[VideoRecording] No active recording to stop');
+        console.warn('[VideoRecording] No active recording');
         resolve(null);
         return;
       }
 
-      mediaRecorder.onstop = () => {
-        console.log(`🎥 Video recording stopped. Chunks: ${recordedChunksRef.current.length}`);
-        
-        if (recordedChunksRef.current.length === 0) {
-          console.warn('[VideoRecording] No video data recorded');
+      // Flush any data buffered since last timeslice tick
+      if (mediaRecorder.state === 'recording') {
+        try { mediaRecorder.requestData(); } catch (_) { /* ignore */ }
+      }
+
+      // Use addEventListener (not onstop) to avoid overwrite races
+      mediaRecorder.addEventListener('stop', () => {
+        const chunks = recordedChunksRef.current;
+        console.log(`[VideoRecording] Stopped — chunks: ${chunks.length}`);
+        if (chunks.length === 0) {
+          console.warn('[VideoRecording] No data recorded');
+          setIsRecording(false);
           resolve(null);
           return;
         }
-
-        // Create video blob from recorded chunks
-        const videoBlob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-        console.log(`🎥 Video blob created: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB`);
-        
+        const blobMime = mediaRecorder.mimeType || 'video/webm';
+        const videoBlob = new Blob(chunks, { type: blobMime });
+        console.log(`[VideoRecording] Blob: ${(videoBlob.size / 1024 / 1024).toFixed(2)} MB — ${blobMime}`);
         setIsRecording(false);
         resolve(videoBlob);
-      };
+      }, { once: true });
 
       mediaRecorder.stop();
     });
@@ -419,11 +512,11 @@ export default function LiveCoaching() {
     }
 
     sessionAggregatorRef.current.startSession(activity);
+    activityDetectorRef.current.reset();
     setIsSessionActive(true);
     setSessionDuration(0);
+    setLiveScore(null);
     console.log(`🟢 Session started: ${activity}`);
-    
-    // Start video recording
     startVideoRecording();
   };
 
@@ -613,6 +706,8 @@ export default function LiveCoaching() {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
       }
+      // Dispose detection pipeline
+      pipelineRef.current.dispose();
     };
   }, []);
 
@@ -702,6 +797,101 @@ export default function LiveCoaching() {
             backgroundColor: "transparent",
           }}
         />
+
+        {/* ── Detection Status Overlay ─────────────────────────────── */}
+        {status.state === 'active' && (pipelineStatus !== 'ready' || detectionStatus !== 'performing') && (
+          <div style={{
+            position: "absolute",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            zIndex: 10,
+            padding: "10px 14px",
+            background: (pipelineStatus === 'no_human' || detectionStatus === 'no_human')
+              ? "rgba(239,68,68,0.82)"
+              : (pipelineStatus === 'too_far' || pipelineStatus === 'too_close')
+                ? "rgba(234,179,8,0.82)"
+                : (pipelineStatus === 'low_confidence' || pipelineStatus === 'stabilizing')
+                  ? "rgba(59,130,246,0.82)"
+                  : detectionSeverity === 'warning'
+                    ? "rgba(234,179,8,0.82)"
+                    : "rgba(14,165,233,0.82)",
+            backdropFilter: "blur(4px)",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+          }}>
+            <span style={{ fontSize: "18px" }}>
+              {(pipelineStatus === 'no_human' || detectionStatus === 'no_human') ? '🚫'
+                : (pipelineStatus === 'too_far') ? '🔭'
+                : (pipelineStatus === 'too_close') ? '🖐️'
+                : (pipelineStatus === 'low_confidence') ? '👁️'
+                : (pipelineStatus === 'stabilizing') ? '⏳'
+                : '⏸️'}
+            </span>
+            <span style={{ fontSize: "13px", fontWeight: 600, color: "#fff" }}>
+              {(pipelineStatus !== 'ready' && pipelineMessage)
+                ? pipelineMessage
+                : detectionMessage || (detectionStatus === 'no_human'
+                  ? 'No athlete detected — step into frame.'
+                  : `Begin your ${activity === 'fitness' ? 'squat' : 'bowling action'} to start scoring.`
+                )}
+            </span>
+            {personCount > 1 && (
+              <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.7)", marginLeft: "auto" }}>
+                👥 {personCount} people — tracking primary
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* ── Live Score Badge (shows while session is active) ───────── */}
+        {isSessionActive && liveScore !== null && detectionStatus === 'performing' && (
+          <div style={{
+            position: "absolute",
+            top: 10,
+            right: 12,
+            zIndex: 10,
+            padding: "6px 14px",
+            borderRadius: "20px",
+            background: liveScore >= 80
+              ? "rgba(16,185,129,0.90)"
+              : liveScore >= 50
+                ? "rgba(234,179,8,0.90)"
+                : "rgba(239,68,68,0.90)",
+            backdropFilter: "blur(4px)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+          }}>
+            <span style={{ fontSize: "10px", fontWeight: 600, color: "#fff", opacity: 0.85, lineHeight: 1 }}>SCORE</span>
+            <span style={{ fontSize: "22px", fontWeight: 800, color: "#fff", lineHeight: 1.1 }}>{liveScore}</span>
+          </div>
+        )}
+
+        {/* ── Recording indicator ────────────────────────────────────── */}
+        {isRecording && (
+          <div style={{
+            position: "absolute",
+            top: 10,
+            left: 12,
+            zIndex: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "4px 10px",
+            borderRadius: "20px",
+            background: "rgba(239,68,68,0.85)",
+            backdropFilter: "blur(4px)",
+          }}>
+            <div style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: "#fff",
+              animation: "pulse 1s infinite",
+            }} />
+            <span style={{ fontSize: "11px", fontWeight: 700, color: "#fff" }}>REC</span>
+          </div>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: "8px", justifyContent: "center", marginBottom: "12px", flexWrap: "wrap" }}>
@@ -756,7 +946,7 @@ export default function LiveCoaching() {
         <div style={{ 
           maxWidth: "640px", 
           margin: "0 auto 16px auto", 
-          padding: "12px", 
+          padding: "12px 16px", 
           background: "linear-gradient(90deg, #10b98120, #0ad4ff20)", 
           border: "1px solid #10b981", 
           borderRadius: "8px",
@@ -767,12 +957,29 @@ export default function LiveCoaching() {
           <div>
             <span style={{ fontSize: "14px", fontWeight: 700, color: "#10b981" }}>⏱️ SESSION ACTIVE</span>
             <span style={{ fontSize: "13px", color: "#b9d7ff", marginLeft: "12px" }}>
-              Duration: {Math.floor(sessionDuration / 60)}m {Math.floor(sessionDuration % 60)}s
+              {Math.floor(sessionDuration / 60)}m {Math.floor(sessionDuration % 60)}s
             </span>
           </div>
-          <div style={{ fontSize: "13px", color: "#b9d7ff" }}>
-            Frames: {sessionAggregatorRef.current.getFrameCount()} | 
-            Violations: {sessionAggregatorRef.current.getViolationCount()}
+
+          {/* Live score */}
+          <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
+            {liveScore !== null && (
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: "10px", color: "#7dd3fc", fontWeight: 600 }}>LIVE SCORE</div>
+                <div style={{
+                  fontSize: "22px",
+                  fontWeight: 800,
+                  color: liveScore >= 80 ? "#10b981" : liveScore >= 50 ? "#eab308" : "#ef4444",
+                }}>
+                  {liveScore}
+                  <span style={{ fontSize: "11px", fontWeight: 400, color: "#7dd3fc" }}>/100</span>
+                </div>
+              </div>
+            )}
+            <div style={{ fontSize: "12px", color: "#b9d7ff", textAlign: "right" }}>
+              <div>Frames: {sessionAggregatorRef.current.getFrameCount()}</div>
+              <div>Violations: {sessionAggregatorRef.current.getViolationCount()}</div>
+            </div>
           </div>
         </div>
       )}

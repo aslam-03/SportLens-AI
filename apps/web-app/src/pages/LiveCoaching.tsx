@@ -12,9 +12,12 @@ import { drawSkeleton } from '@/utils/drawSkeleton';
 import { calculateBiomechanics, AngleSmoother, BiomechanicsFrame } from '@/Biomechanics/angleCalculator';
 import { RuleEngine, RuleViolation } from '@/rules/ruleEngine';
 import { FITNESS_RULES } from '@/rules/fitnessRules';
+import { CRICKET_BOWLING_RULES } from '@/rules/cricketRules';
 import { SessionAggregator } from '@/utils/sessionAggregator';
 import { saveSessionToFirestore, updateSessionR2Objects } from '@/services/firestoreSessionService';
 import { uploadKeypointsToR2, uploadVideoToR2 } from '@/services/r2UploadService';
+import { ActivityDetector, ActivityStatus } from '@/engine/activityDetector';
+import { DetectionPipeline, PipelineStatus } from '@/engine/detectionPipeline';
 
 interface Activity {
   id: string;
@@ -115,6 +118,21 @@ export default function LiveCoaching() {
   const smootherRef = useRef<AngleSmoother>(new AngleSmoother(5));
   const feedbackIdCounter = useRef(0);
 
+  // Activity detection — human presence + action recognition
+  const activityDetectorRef = useRef<ActivityDetector>(new ActivityDetector('fitness'));
+  const [detectionStatus, setDetectionStatus] = useState<ActivityStatus>('idle');
+  const [detectionMessage, setDetectionMessage] = useState<string>('');
+  const [detectionSeverity, setDetectionSeverity] = useState<'info' | 'warning' | 'error'>('info');
+  const [liveScore, setLiveScore] = useState<number | null>(null);
+
+  // Detection pipeline (COCO-SSD + confidence + smoothing + tracking + stability)
+  const pipelineRef = useRef<DetectionPipeline>(new DetectionPipeline());
+  const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>('initializing');
+  const [pipelineMessage, setPipelineMessage] = useState<string>('Initializing detection...');
+  const [pipelineReady, setPipelineReady] = useState(false);
+  const [personCount, setPersonCount] = useState(0);
+  const poseFrameCountRef = useRef(0);
+
   // Session management
   const sessionAggregatorRef = useRef<SessionAggregator>(new SessionAggregator());
   const sessionStartTimeRef = useRef<number>(0);
@@ -133,8 +151,12 @@ export default function LiveCoaching() {
   const [saveProgress, setSaveProgress] = useState<string>('');
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Camera facing mode for mobile
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  // Camera facing mode — default to rear camera on mobile, front on desktop
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>(() => {
+    const ua = navigator.userAgent.toLowerCase();
+    const isMobile = /android|iphone|ipad|ipod|mobile/.test(ua);
+    return isMobile ? 'environment' : 'user';
+  });
 
   const currentUser: User = {
     name: user?.displayName || user?.email?.split('@')[0] || 'User',
@@ -142,7 +164,7 @@ export default function LiveCoaching() {
     initials: user?.displayName?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'
   };
 
-  // Initialize rule engine when activity is selected
+  // Initialize rule engine + activity detector when activity is selected
   useEffect(() => {
     if (selectedActivity) {
       const engine = new RuleEngine({ defaultCooldownMs: 3000, maxActiveViolations: 3 });
@@ -150,11 +172,15 @@ export default function LiveCoaching() {
       // Load rules based on activity category
       if (selectedActivity.category === 'fitness') {
         engine.addRules(FITNESS_RULES);
+      } else {
+        engine.addRules(CRICKET_BOWLING_RULES);
       }
-      // Cricket rules can be added here when available
       
       ruleEngineRef.current = engine;
       smootherRef.current.reset();
+
+      // Configure activity detector
+      activityDetectorRef.current.setActivity(selectedActivity.category);
     }
   }, [selectedActivity]);
 
@@ -171,40 +197,120 @@ export default function LiveCoaching() {
 
   // Handle pose detection results
   const handlePoseResults = (results: PoseLandmarks) => {
-    console.log('Pose results received:', results ? 'Landmarks detected' : 'No landmarks');
-    
-    // Draw skeleton overlay on canvas
-    if (canvasRef.current && results) {
-      drawSkeleton(canvasRef.current, results, {
-        jointColor: '#00D9FF', // Bright cyan for visibility
-        lineColor: '#0080FF', // Blue for connections
-        jointRadius: 8,
-        lineWidth: 3
-      });
+    poseFrameCountRef.current++;
+
+    // ── 0. Always clear canvas first — no stale skeleton lingers ──
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d');
+      ctx?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     }
 
-    // Calculate real biomechanics
-    const biomechanics = calculateBiomechanics(results, 0.5);
+    // ── 0b. Run detection pipeline (COCO-SSD + confidence + smoothing + tracking + stability) ──
+    let pipelineResult;
+    if (pipelineRef.current.ready) {
+      pipelineResult = pipelineRef.current.processSync(results);
+      setPipelineStatus(pipelineResult.status);
+      setPipelineMessage(pipelineResult.message);
+      setPersonCount(pipelineResult.personCount);
+
+      // Run COCO-SSD async every few frames (lightweight — doesn't block)
+      if (poseFrameCountRef.current % 3 === 0 && videoRef.current) {
+        pipelineRef.current.process(videoRef.current, results).then(asyncResult => {
+          setPipelineStatus(asyncResult.status);
+          setPipelineMessage(asyncResult.message);
+          setPersonCount(asyncResult.personCount);
+        }).catch(() => {});
+      }
+    } else {
+      pipelineResult = null;
+    }
+
+    // Use pipeline-smoothed landmarks if available, otherwise raw
+    const effectiveResults: PoseLandmarks = pipelineResult?.poseLandmarks ?? results;
+    const shouldProceed = pipelineResult ? pipelineResult.shouldScore : true;
+    // When pipeline is null (COCO-SSD failed to load), do a basic confidence gate
+    // to prevent hallucinated skeletons on empty scenes
+    let shouldDraw: boolean;
+    if (pipelineResult) {
+      shouldDraw = pipelineResult.shouldDrawSkeleton;
+    } else {
+      // Fallback: check raw landmark avg visibility > 0.35
+      const rawLm = results?.landmarks ?? [];
+      if (rawLm.length > 0) {
+        const avgVis = rawLm.reduce((s, l) => s + (l.visibility ?? 0), 0) / rawLm.length;
+        shouldDraw = avgVis > 0.35;
+      } else {
+        shouldDraw = false;
+      }
+    }
+
+    // ── 1. Biomechanics ──────────────────────────────────────────
+    const biomechanics = calculateBiomechanics(effectiveResults, 0.3);
     const smoothedBiomechanics = smootherRef.current.smoothFrame(biomechanics);
     setCurrentBiomechanics(smoothedBiomechanics);
 
-    // Add frame to session aggregator if session is active
-    if (sessionAggregatorRef.current.isActive()) {
-      sessionAggregatorRef.current.addFrame(smoothedBiomechanics);
+    // ── 2. Rule engine ───────────────────────────────────────────
+    const violations = ruleEngineRef.current
+      ? ruleEngineRef.current.evaluate(smoothedBiomechanics)
+      : [];
+
+    // ── 3. Activity detection (human presence + action check) ────
+    const actResult = activityDetectorRef.current.evaluate(
+      smoothedBiomechanics,
+      effectiveResults.landmarks ?? null,
+      violations
+    );
+
+    // Override activity detection with pipeline status when not ready
+    if (pipelineResult && pipelineResult.status !== 'ready') {
+      setDetectionStatus(pipelineResult.status === 'no_human' ? 'no_human' : 'idle');
+      setDetectionMessage(pipelineResult.message);
+      setDetectionSeverity(pipelineResult.severity);
+    } else {
+      setDetectionStatus(actResult.status);
+      setDetectionMessage(actResult.message);
+      setDetectionSeverity(actResult.severity);
     }
 
-    // Update metrics based on real biomechanics
-    updateMetricsFromBiomechanics(smoothedBiomechanics);
-
-    // Evaluate rules and generate feedback
-    if (ruleEngineRef.current) {
-      const violations = ruleEngineRef.current.evaluate(smoothedBiomechanics);
-      
-      // Add violations to session aggregator if session is active
-      if (sessionAggregatorRef.current.isActive() && violations.length > 0) {
+    // ── 4. Session aggregation ───────────────────────────────────
+    if (sessionAggregatorRef.current.isActive() && shouldProceed) {
+      if (actResult.status !== 'no_human') {
+        sessionAggregatorRef.current.addFrame(smoothedBiomechanics);
+      }
+      if (violations.length > 0) {
         sessionAggregatorRef.current.addViolations(violations);
       }
-      
+      sessionAggregatorRef.current.addFrameQuality(
+        actResult.status,
+        actResult.frameQualityScore
+      );
+      setLiveScore(sessionAggregatorRef.current.getLiveScore());
+    }
+
+    // ── 5. Canvas skeleton — only draw when pipeline + activity say OK ──
+    if (
+      canvasRef.current &&
+      effectiveResults?.landmarks &&
+      effectiveResults.landmarks.length > 0 &&
+      shouldDraw &&
+      actResult.status !== 'no_human'
+    ) {
+      drawSkeleton(canvasRef.current, effectiveResults, {
+        jointColor: '#00D9FF',
+        lineColor: '#0080FF',
+        jointRadius: 8,
+        lineWidth: 3,
+        visibilityThreshold: 0.5,
+      });
+    }
+
+    // ── 6. Update metrics only when human present and pipeline ready ──
+    if (actResult.status !== 'no_human' && shouldProceed) {
+      updateMetricsFromBiomechanics(smoothedBiomechanics);
+    }
+
+    // ── 7. Feedback from violations (only when performing) ───────
+    if (actResult.status === 'performing' && shouldProceed && violations.length > 0) {
       updateFeedbackFromViolations(violations);
     }
   };
@@ -221,6 +327,15 @@ export default function LiveCoaching() {
       }
 
       if (videoRef.current && videoRef.current.readyState === 4) {
+        // Sync canvas size to video
+        if (canvasRef.current) {
+          const w = videoRef.current.videoWidth || videoRef.current.clientWidth;
+          const h = videoRef.current.videoHeight || videoRef.current.clientHeight;
+          if (canvasRef.current.width !== w || canvasRef.current.height !== h) {
+            canvasRef.current.width = w;
+            canvasRef.current.height = h;
+          }
+        }
         try {
           await detectPose(videoRef.current);
         } catch (error) {
@@ -285,6 +400,19 @@ export default function LiveCoaching() {
                 setPoseInitialized(true);
                 console.log('✓ Pose detection initialized successfully');
                 
+                // Initialize COCO-SSD detection pipeline
+                console.log('Initializing COCO-SSD detection pipeline...');
+                try {
+                  await pipelineRef.current.initialize();
+                  setPipelineReady(true);
+                  setPipelineStatus('ready');
+                  setPipelineMessage('');
+                  console.log('✅ Detection pipeline ready (COCO-SSD + confidence + tracking + stability)');
+                } catch (pipelineErr) {
+                  console.warn('⚠️ COCO-SSD pipeline failed — falling back to pose-only detection:', pipelineErr);
+                  setPipelineMessage('Person detection unavailable — using pose-only mode.');
+                }
+
                 // Small delay to ensure everything is ready
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
@@ -330,6 +458,11 @@ export default function LiveCoaching() {
         closePose();
         setPoseInitialized(false);
       }
+
+      // Dispose detection pipeline
+      pipelineRef.current.dispose();
+      setPipelineStatus('initializing');
+      setPipelineReady(false);
       
       // ⚠️ IMPORTANT: Only stop camera if NOT recording
       // During recording, we need the stream alive for MediaRecorder
@@ -847,11 +980,16 @@ export default function LiveCoaching() {
       setRealTimeFeedback([]);
       setCurrentBiomechanics(null);
       lastValidMetricsRef.current = [];
+      setLiveScore(null);
+      setDetectionStatus('idle');
+      setDetectionMessage('');
       
       if (ruleEngineRef.current) {
         ruleEngineRef.current.reset();
       }
       smootherRef.current.reset();
+      activityDetectorRef.current.reset();
+      pipelineRef.current.reset();
       
       // Start session aggregator
       sessionAggregatorRef.current.startSession(selectedActivity.category);
@@ -1165,7 +1303,69 @@ export default function LiveCoaching() {
                 <canvas
                   ref={canvasRef}
                   className="absolute inset-0 w-full h-full"
+                  style={{ pointerEvents: 'none' }}
                 />
+
+                {/* ── Detection Status Overlay (pipeline + activity) ─── */}
+                {!isInitializing && poseInitialized && (pipelineStatus !== 'ready' || detectionStatus !== 'performing') && (
+                  <div
+                    className="absolute bottom-0 left-0 right-0 z-20 flex items-center gap-3 px-4 py-3"
+                    style={{
+                      background:
+                        (pipelineStatus === 'no_human' || detectionStatus === 'no_human')
+                          ? 'rgba(239,68,68,0.85)'
+                          : (pipelineStatus === 'too_far' || pipelineStatus === 'too_close')
+                            ? 'rgba(234,179,8,0.85)'
+                            : (pipelineStatus === 'low_confidence' || pipelineStatus === 'stabilizing')
+                              ? 'rgba(59,130,246,0.85)'
+                              : detectionSeverity === 'warning'
+                                ? 'rgba(234,179,8,0.85)'
+                                : 'rgba(14,165,233,0.80)',
+                      backdropFilter: 'blur(6px)',
+                    }}
+                  >
+                    <span className="text-lg">
+                      {(pipelineStatus === 'no_human' || detectionStatus === 'no_human') ? '\uD83D\uDEAB'
+                        : pipelineStatus === 'too_far' ? '\uD83D\uDD2D'
+                        : pipelineStatus === 'too_close' ? '\uD83D\uDD90\uFE0F'
+                        : pipelineStatus === 'low_confidence' ? '\uD83D\uDC41\uFE0F'
+                        : pipelineStatus === 'stabilizing' ? '\u23F3'
+                        : '\u23F8\uFE0F'}
+                    </span>
+                    <span className="text-white text-sm font-semibold">
+                      {(pipelineStatus !== 'ready' && pipelineMessage)
+                        ? pipelineMessage
+                        : detectionMessage ||
+                          (detectionStatus === 'no_human'
+                            ? 'No athlete detected \u2014 step into frame.'
+                            : `Begin your ${selectedActivity?.name ?? 'exercise'} to start scoring.`)}
+                    </span>
+                    {personCount > 1 && (
+                      <span className="text-white/70 text-xs ml-auto">
+                        \uD83D\uDC65 {personCount} people \u2014 tracking primary
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Live Score Badge ─── */}
+                {liveScore !== null && detectionStatus === 'performing' && (
+                  <div
+                    className="absolute top-20 right-4 z-20 flex flex-col items-center rounded-full px-4 py-2"
+                    style={{
+                      background:
+                        liveScore >= 80
+                          ? 'rgba(16,185,129,0.90)'
+                          : liveScore >= 50
+                            ? 'rgba(234,179,8,0.90)'
+                            : 'rgba(239,68,68,0.90)',
+                      backdropFilter: 'blur(4px)',
+                    }}
+                  >
+                    <span className="text-[10px] font-semibold text-white/80 leading-none">SCORE</span>
+                    <span className="text-2xl font-extrabold text-white leading-tight">{liveScore}</span>
+                  </div>
+                )}
 
                 {/* Loading Indicator for Pose Detection */}
                 {isInitializing && (

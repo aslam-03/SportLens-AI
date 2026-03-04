@@ -32,7 +32,10 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 # CORS settings - allow requests from frontend
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# Includes wildcard fallback so mobile devices on the same LAN can reach the backend
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+# If "*" is among the origins, just use ["*"]; otherwise keep the list
+ALLOWED_ORIGINS = ["*"] if "*" in _raw_origins else [o.strip() for o in _raw_origins]
 API_PORT = int(os.getenv("API_PORT", 8000))
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 
