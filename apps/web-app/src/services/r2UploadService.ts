@@ -15,6 +15,15 @@ import { auth } from '../firebase';
 const BACKEND_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 /**
+ * Normalize content type by stripping codec params.
+ * e.g. 'video/webm;codecs=vp8' → 'video/webm'
+ * The backend and R2 presigned URL only need the base MIME type.
+ */
+function normalizeContentType(raw: string): string {
+  return raw.split(';')[0].trim().toLowerCase();
+}
+
+/**
  * Error class for R2 upload failures
  */
 export class R2UploadError extends Error {
@@ -42,7 +51,9 @@ async function requestPresignedUrl(
     throw new R2UploadError('User must be authenticated to upload files', 'AUTH_REQUIRED');
   }
 
-  console.log(`[R2Upload] Requesting presigned URL for: ${fileName}`);
+  // Normalize content type to base MIME (strips codec params)
+  const normalizedType = normalizeContentType(contentType);
+  console.log(`[R2Upload] Requesting presigned URL for: ${fileName} (type: ${normalizedType})`);
   console.log(`[R2Upload] Backend URL: ${BACKEND_URL}`);
 
   // Get Firebase ID token
@@ -65,7 +76,7 @@ async function requestPresignedUrl(
       body: JSON.stringify({
         sessionId,
         fileName,
-        contentType,
+        contentType: normalizedType,
       }),
     });
 
@@ -110,13 +121,15 @@ async function uploadToR2(
   file: Blob,
   contentType: string
 ): Promise<void> {
-  console.log(`[R2Upload] Starting file upload - Size: ${(file.size / 1024 / 1024).toFixed(2)} MB, Type: ${contentType}`);
+  // Use the same normalized type that the presigned URL was created with
+  const normalizedType = normalizeContentType(contentType);
+  console.log(`[R2Upload] Starting file upload - Size: ${(file.size / 1024 / 1024).toFixed(2)} MB, Type: ${normalizedType}`);
   
   try {
     const response = await fetch(uploadUrl, {
       method: 'PUT',
       headers: {
-        'Content-Type': contentType,
+        'Content-Type': normalizedType,
       },
       body: file,
     });

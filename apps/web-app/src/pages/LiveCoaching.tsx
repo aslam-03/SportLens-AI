@@ -151,8 +151,12 @@ export default function LiveCoaching() {
   const [saveProgress, setSaveProgress] = useState<string>('');
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Camera facing mode for mobile
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  // Camera facing mode — default to rear camera on mobile, front on desktop
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>(() => {
+    const ua = navigator.userAgent.toLowerCase();
+    const isMobile = /android|iphone|ipad|ipod|mobile/.test(ua);
+    return isMobile ? 'environment' : 'user';
+  });
 
   const currentUser: User = {
     name: user?.displayName || user?.email?.split('@')[0] || 'User',
@@ -224,7 +228,21 @@ export default function LiveCoaching() {
     // Use pipeline-smoothed landmarks if available, otherwise raw
     const effectiveResults: PoseLandmarks = pipelineResult?.poseLandmarks ?? results;
     const shouldProceed = pipelineResult ? pipelineResult.shouldScore : true;
-    const shouldDraw = pipelineResult ? pipelineResult.shouldDrawSkeleton : true;
+    // When pipeline is null (COCO-SSD failed to load), do a basic confidence gate
+    // to prevent hallucinated skeletons on empty scenes
+    let shouldDraw: boolean;
+    if (pipelineResult) {
+      shouldDraw = pipelineResult.shouldDrawSkeleton;
+    } else {
+      // Fallback: check raw landmark avg visibility > 0.35
+      const rawLm = results?.landmarks ?? [];
+      if (rawLm.length > 0) {
+        const avgVis = rawLm.reduce((s, l) => s + (l.visibility ?? 0), 0) / rawLm.length;
+        shouldDraw = avgVis > 0.35;
+      } else {
+        shouldDraw = false;
+      }
+    }
 
     // ── 1. Biomechanics ──────────────────────────────────────────
     const biomechanics = calculateBiomechanics(effectiveResults, 0.3);

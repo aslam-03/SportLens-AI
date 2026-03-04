@@ -7,7 +7,6 @@ Allows secure client-side uploads without exposing credentials.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from typing import Literal
 import logging
 
 from auth import verify_firebase_token, get_user_id
@@ -26,9 +25,9 @@ class GenerateUploadUrlRequest(BaseModel):
     """Request body for generating presigned upload URL."""
     
     fileName: str = Field(..., description="File name (e.g., 'keypoints.json')")
-    contentType: Literal["application/json", "video/webm", "video/mp4"] = Field(
+    contentType: str = Field(
         ..., 
-        description="MIME type of the file"
+        description="MIME type of the file (e.g. application/json, video/webm, video/mp4)"
     )
     sessionId: str = Field(..., description="Session ID for organizing uploads")
     
@@ -96,7 +95,16 @@ async def generate_upload_url(
         # Get user ID from token
         uid = get_user_id(token_data)
         
-        logger.info(f"📤 Generating upload URL for user {uid}, session {request.sessionId}")
+        # Normalize and validate content type
+        base_content_type = request.contentType.split(";")[0].strip().lower()
+        ALLOWED_TYPES = {"application/json", "video/webm", "video/mp4", "video/x-matroska"}
+        if base_content_type not in ALLOWED_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported content type: {base_content_type}. Allowed: {', '.join(ALLOWED_TYPES)}"
+            )
+        
+        logger.info(f"📤 Generating upload URL for user {uid}, session {request.sessionId} (type: {base_content_type})")
         
         # Construct object key
         object_key = f"users/{uid}/sessions/{request.sessionId}/{request.fileName}"
@@ -104,10 +112,10 @@ async def generate_upload_url(
         # Get R2 client
         r2_client = get_r2_client()
         
-        # Generate presigned upload URL
+        # Generate presigned upload URL using the normalized base content type
         upload_url = r2_client.generate_presigned_upload_url(
             object_key=object_key,
-            content_type=request.contentType,
+            content_type=base_content_type,
             expires_in=300  # 5 minutes
         )
         

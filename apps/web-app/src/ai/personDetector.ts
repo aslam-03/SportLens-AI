@@ -53,7 +53,7 @@ export interface PersonDetectionResult {
 // ─────────────────────────────────────────────────────────────────
 
 /** Minimum COCO-SSD confidence to count as a person */
-const MIN_PERSON_CONFIDENCE = 0.45;
+const MIN_PERSON_CONFIDENCE = 0.35;
 
 /** Weight for bounding box area in subject selection */
 const AREA_WEIGHT = 0.7;
@@ -70,6 +70,9 @@ const MAX_HEIGHT_RATIO = 0.85;
 /** How often to run COCO-SSD (every N frames) — it's slower than pose */
 const DETECTION_INTERVAL_FRAMES = 3;
 
+/** Max frames before the cached result is considered stale */
+const MAX_CACHE_AGE_FRAMES = 8;
+
 // ─────────────────────────────────────────────────────────────────
 // PersonDetector Class
 // ─────────────────────────────────────────────────────────────────
@@ -79,6 +82,7 @@ export class PersonDetector {
   private isLoading = false;
   private isReady = false;
   private frameCounter = 0;
+  private lastDetectionFrame = 0;  // frame at which COCO-SSD last ran
   private lastResult: PersonDetectionResult = {
     personDetected: false,
     primaryPerson: null,
@@ -192,6 +196,7 @@ export class PersonDetector {
           message: 'No human detected — please step into frame.',
           personCount: 0,
         };
+        this.lastDetectionFrame = this.frameCounter;
         return this.lastResult;
       }
 
@@ -220,6 +225,7 @@ export class PersonDetector {
         message: distanceMessage,
         personCount: persons.length,
       };
+      this.lastDetectionFrame = this.frameCounter;
 
       return this.lastResult;
     } catch (err) {
@@ -230,8 +236,21 @@ export class PersonDetector {
 
   /**
    * Get the last detection result without running detection.
+   * Returns stale/empty result if the cached data is too old.
    */
   getLastResult(): PersonDetectionResult {
+    // If too many frames have passed since last real detection, expire the cache
+    const age = this.frameCounter - this.lastDetectionFrame;
+    if (age > MAX_CACHE_AGE_FRAMES) {
+      return {
+        personDetected: false,
+        primaryPerson: null,
+        allPersons: [],
+        distanceStatus: 'ok',
+        message: 'Person detection stale — re-checking...',
+        personCount: 0,
+      };
+    }
     return this.lastResult;
   }
 
@@ -268,6 +287,7 @@ export class PersonDetector {
    */
   reset(): void {
     this.frameCounter = 0;
+    this.lastDetectionFrame = 0;
     this.lastResult = {
       personDetected: false,
       primaryPerson: null,

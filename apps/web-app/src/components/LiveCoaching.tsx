@@ -118,8 +118,12 @@ export default function LiveCoaching() {
 
     try {
       console.log('STEP 1️⃣ getUserMedia request starting');
+      // Default to rear camera on mobile, front camera on desktop
+      const ua = navigator.userAgent.toLowerCase();
+      const isMobile = /android|iphone|ipad|ipod|mobile/.test(ua);
+      const preferredFacing = isMobile ? 'environment' : 'user';
       const constraints = {
-        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: preferredFacing, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -228,7 +232,19 @@ export default function LiveCoaching() {
                 // Use pipeline-smoothed landmarks if available, otherwise raw
                 const effectiveResults: PoseLandmarks = pipelineResult?.poseLandmarks ?? results;
                 const shouldProceed = pipelineResult ? pipelineResult.shouldScore : true;
-                const shouldDraw = pipelineResult ? pipelineResult.shouldDrawSkeleton : true;
+                // When pipeline is null (COCO-SSD failed), do a basic confidence gate
+                let shouldDraw: boolean;
+                if (pipelineResult) {
+                  shouldDraw = pipelineResult.shouldDrawSkeleton;
+                } else {
+                  const rawLm = results?.landmarks ?? [];
+                  if (rawLm.length > 0) {
+                    const avgVis = rawLm.reduce((s: number, l: any) => s + (l.visibility ?? 0), 0) / rawLm.length;
+                    shouldDraw = avgVis > 0.35;
+                  } else {
+                    shouldDraw = false;
+                  }
+                }
 
                 // ── 1. Biomechanics calculation ──────────────────────────
                 const rawFrame = calculateBiomechanics(effectiveResults, 0.3);

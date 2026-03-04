@@ -424,7 +424,7 @@ export class ActivityDetector {
    * This prevents MediaPipe from "finding" a pose on chairs, walls, or props.
    */
   private isHumanPresent(landmarks: Landmark[]): boolean {
-    const VIS_THRESHOLD = 0.50;
+    const VIS_THRESHOLD = 0.35;  // lowered from 0.50 — during movement visibility drops
 
     const criticalIndices = [
       LANDMARK_INDICES.LEFT_SHOULDER,
@@ -437,7 +437,7 @@ export class ActivityDetector {
       LANDMARK_INDICES.RIGHT_ANKLE,
     ];
 
-    // Gate 1: At least 6 / 8 joints at sufficient visibility
+    // Gate 1: At least 4 / 8 joints at sufficient visibility (was 6 — too strict during motion)
     let visibleCount = 0;
     let visibilitySum = 0;
     for (const idx of criticalIndices) {
@@ -445,21 +445,21 @@ export class ActivityDetector {
       visibilitySum += vis;
       if (vis >= VIS_THRESHOLD) visibleCount++;
     }
-    if (visibleCount < 6) return false;
+    if (visibleCount < 4) return false;
 
-    // Gate 2: Both shoulders must be confidently detected (upper-body anchor)
+    // Gate 2: At least ONE shoulder must be visible (was both — too strict during turns/movement)
     const lShoulderVis = (landmarks[LANDMARK_INDICES.LEFT_SHOULDER]?.visibility ?? 0);
     const rShoulderVis = (landmarks[LANDMARK_INDICES.RIGHT_SHOULDER]?.visibility ?? 0);
-    if (lShoulderVis < VIS_THRESHOLD || rShoulderVis < VIS_THRESHOLD) return false;
+    if (lShoulderVis < VIS_THRESHOLD && rShoulderVis < VIS_THRESHOLD) return false;
 
     // Gate 3: At least one hip visible (torso anchor)
     const lHipVis = (landmarks[LANDMARK_INDICES.LEFT_HIP]?.visibility ?? 0);
     const rHipVis = (landmarks[LANDMARK_INDICES.RIGHT_HIP]?.visibility ?? 0);
     if (lHipVis < VIS_THRESHOLD && rHipVis < VIS_THRESHOLD) return false;
 
-    // Gate 4: Mean confidence of all 8 joints must be ≥ 0.45
+    // Gate 4: Mean confidence of all 8 joints must be ≥ 0.30 (was 0.45)
     const meanVis = visibilitySum / criticalIndices.length;
-    if (meanVis < 0.45) return false;
+    if (meanVis < 0.30) return false;
 
     // Gate 5: Torso geometry — shoulders should be ABOVE hips in frame
     // (MediaPipe normalized y: 0 = top, 1 = bottom, so shoulder.y < hip.y is upright)
@@ -468,12 +468,18 @@ export class ActivityDetector {
     const lHip = landmarks[LANDMARK_INDICES.LEFT_HIP];
     const rHip = landmarks[LANDMARK_INDICES.RIGHT_HIP];
 
-    if (lShoulder && rShoulder && (lHip || rHip)) {
-      const avgShoulderY = (lShoulder.y + rShoulder.y) / 2;
-      const validHips = [lHip, rHip].filter(Boolean) as Landmark[];
-      const avgHipY = validHips.reduce((s, h) => s + h.y, 0) / validHips.length;
-      // Shoulders must be at least 5% of frame height above hips
-      if (avgShoulderY > avgHipY - 0.05) return false;
+    // Only check geometry if we have confident enough data for both sides
+    const haveBothSides = (lShoulderVis >= VIS_THRESHOLD || rShoulderVis >= VIS_THRESHOLD)
+                       && (lHipVis >= VIS_THRESHOLD || rHipVis >= VIS_THRESHOLD);
+    if (haveBothSides) {
+      const shoulders = [lShoulder, rShoulder].filter((s, i) => s && [lShoulderVis, rShoulderVis][i] >= VIS_THRESHOLD);
+      const hips = [lHip, rHip].filter((h, i) => h && [lHipVis, rHipVis][i] >= VIS_THRESHOLD);
+      if (shoulders.length > 0 && hips.length > 0) {
+        const avgShoulderY = shoulders.reduce((s, lm) => s + lm!.y, 0) / shoulders.length;
+        const avgHipY = hips.reduce((s, lm) => s + lm!.y, 0) / hips.length;
+        // Shoulders must be above hips (with small tolerance)
+        if (avgShoulderY > avgHipY + 0.02) return false;
+      }
     }
 
     return true;

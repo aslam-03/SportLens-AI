@@ -93,13 +93,13 @@ export interface PipelineConfig {
 // ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG: PipelineConfig = {
-  minVisibleKeypoints: 8,
-  minAvgConfidence: 0.6,
-  minTorsoConfidence: 0.7,
-  keypointVisibilityThreshold: 0.6,
+  minVisibleKeypoints: 6,
+  minAvgConfidence: 0.4,
+  minTorsoConfidence: 0.5,
+  keypointVisibilityThreshold: 0.4,
   smoothingAlpha: 0.35,
-  stabilityFrameCount: 5,
-  trackingMaxDistance: 0.25,  // normalized coords
+  stabilityFrameCount: 3,
+  trackingMaxDistance: 0.45,  // normalized coords — allow normal exercise movement
 };
 
 // Torso keypoint indices for torso confidence check
@@ -127,6 +127,9 @@ export class DetectionPipeline {
   // Stability buffer
   private consecutiveValidFrames = 0;
   private isStable = false;
+  private consecutiveFailFrames = 0;  // count consecutive failures AFTER becoming stable
+  /** How many consecutive failures an already-stable pipeline tolerates before losing stability */
+  private static readonly STABLE_GRACE_FAILURES = 4;
 
   // Debug logging
   private _debugCounter = 0;
@@ -272,8 +275,25 @@ export class DetectionPipeline {
     // ── STAGE 7: Pose Tracking ───────────────────────────────────
     const tracked = this.trackPose(smoothedLandmarks);
     if (!tracked) {
-      // Pose jumped too far — likely switched to different person
+      // Pose center jumped — if we're already stable, tolerate a few misses
+      // (normal exercise movement can cause center jumps)
       this.decrementStability();
+      if (this.isStable) {
+        // Still stable (grace period) — show skeleton but skip scoring
+        return {
+          status: 'ready',
+          message: '',
+          severity: 'info',
+          landmarks: smoothedLandmarks,
+          poseLandmarks: { ...poseLandmarks, landmarks: smoothedLandmarks },
+          shouldDrawSkeleton: true,
+          shouldScore: false,  // skip scoring on tracking miss
+          personCount: personResult.personCount,
+          distanceStatus: 'ok',
+          stabilityFramesRemaining: 0,
+          avgConfidence: confidenceResult.avgConfidence,
+        };
+      }
       return {
         status: 'low_confidence',
         message: 'Pose tracking lost — hold position.',
@@ -290,8 +310,7 @@ export class DetectionPipeline {
     }
 
     // ── STAGE 8: Stability Buffer ────────────────────────────────
-    this.consecutiveValidFrames++;
-    const framesRemaining = Math.max(0, this.config.stabilityFrameCount - this.consecutiveValidFrames);
+    this.consecutiveValidFrames++;    this.consecutiveFailFrames = 0;  // good frame resets fail counter    const framesRemaining = Math.max(0, this.config.stabilityFrameCount - this.consecutiveValidFrames);
 
     if (this.consecutiveValidFrames >= this.config.stabilityFrameCount) {
       this.isStable = true;
@@ -433,6 +452,22 @@ export class DetectionPipeline {
 
     if (!tracked) {
       this.decrementStability();
+      if (this.isStable) {
+        const smoothedPose: PoseLandmarks = { ...poseLandmarks, landmarks: smoothedLandmarks };
+        return {
+          status: 'ready',
+          message: '',
+          severity: 'info',
+          landmarks: smoothedLandmarks,
+          poseLandmarks: smoothedPose,
+          shouldDrawSkeleton: true,
+          shouldScore: false,
+          personCount: personResult.personCount,
+          distanceStatus: 'ok',
+          stabilityFramesRemaining: 0,
+          avgConfidence: confidenceResult.avgConfidence,
+        };
+      }
       return {
         status: 'low_confidence',
         message: 'Pose tracking lost — hold position.',
@@ -449,6 +484,7 @@ export class DetectionPipeline {
     }
 
     this.consecutiveValidFrames++;
+    this.consecutiveFailFrames = 0;  // good frame resets fail counter
     const framesRemaining = Math.max(0, this.config.stabilityFrameCount - this.consecutiveValidFrames);
 
     if (this.consecutiveValidFrames >= this.config.stabilityFrameCount) {
@@ -659,14 +695,25 @@ export class DetectionPipeline {
 
   private resetStability(): void {
     this.consecutiveValidFrames = 0;
+    this.consecutiveFailFrames = 0;
     this.isStable = false;
   }
 
   private decrementStability(): void {
-    this.consecutiveValidFrames = Math.max(0, this.consecutiveValidFrames - 2);
-    if (this.consecutiveValidFrames < this.config.stabilityFrameCount) {
-      this.isStable = false;
+    // If we're already stable, use a grace period — don't drop stability on
+    // individual bad frames (movement, partial occlusion, etc.)
+    if (this.isStable) {
+      this.consecutiveFailFrames++;
+      if (this.consecutiveFailFrames >= DetectionPipeline.STABLE_GRACE_FAILURES) {
+        // Too many consecutive failures — actually lost the person
+        this.isStable = false;
+        this.consecutiveValidFrames = 0;
+        this.consecutiveFailFrames = 0;
+      }
+      return;
     }
+    // Not yet stable — decrement by 1 (was 2, which was too aggressive)
+    this.consecutiveValidFrames = Math.max(0, this.consecutiveValidFrames - 1);
   }
 
   /**
@@ -676,6 +723,7 @@ export class DetectionPipeline {
     this.previousLandmarks = null;
     this.previousCenter = null;
     this.consecutiveValidFrames = 0;
+    this.consecutiveFailFrames = 0;
     this.isStable = false;
     this._debugCounter = 0;
     this.personDetector.reset();
