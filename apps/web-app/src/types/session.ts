@@ -103,8 +103,19 @@ export interface SessionMetrics {
   totalViolations: number;
   
   // Performance score (0-100, higher is better)
-  // Calculated as: max(0, 100 - (totalViolations * penalty))
+  // Calculated as: (goodFrames / totalScoredFrames) * 100
+  // A "good frame" has no active violations during activity performance.
   performanceScore: number;
+
+  // Frame-quality breakdown (optional — not present in old sessions)
+  /** Total frames where athlete was actively performing the exercise */
+  totalScoredFrames?: number;
+  /** Frames with no violations (quality >= 80/100) */
+  goodFrames?: number;
+  /** Frames where no human was detected (excluded from score) */
+  noHumanFrames?: number;
+  /** Frames where human was idle / not performing activity */
+  idleFrames?: number;
 }
 
 /**
@@ -186,18 +197,20 @@ export function generateSessionId(): string {
 }
 
 /**
- * Helper function to calculate performance score
- * 
- * Formula: max(0, 100 - (totalViolations * violationPenalty))
- * - Perfect form (0 violations) = 100 score
- * - Each violation reduces score by penalty (default 5 points)
- * - Minimum score is 0
+ * Calculate performance score from frame-quality data.
+ *
+ * Formula: (goodFrames / totalScoredFrames) * 100
+ *  - goodFrames:       frames with no violations during active exercise
+ *  - totalScoredFrames: frames where the athlete was actively performing
+ *
+ * Returns 100 (neutral) when no scored frames available yet.
  */
 export function calculatePerformanceScore(
-  totalViolations: number,
-  violationPenalty: number = 5
+  goodFrames: number,
+  totalScoredFrames: number
 ): number {
-  return Math.max(0, 100 - (totalViolations * violationPenalty));
+  if (totalScoredFrames === 0) return 100;
+  return Math.round(Math.min(100, Math.max(0, (goodFrames / totalScoredFrames) * 100)))
 }
 
 /**
