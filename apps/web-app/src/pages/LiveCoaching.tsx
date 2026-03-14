@@ -113,6 +113,12 @@ export default function LiveCoaching() {
   const [isInitializing, setIsInitializing] = useState(false);
   const lastValidMetricsRef = useRef<Metric[]>([]);
   
+  // New State for Session Logic
+  const [showDurationModal, setShowDurationModal] = useState(false);
+  const [targetDurationMinutes, setTargetDurationMinutes] = useState('5');
+  const [targetDurationSeconds, setTargetDurationSeconds] = useState(0);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  
   // Rule engine and smoother instances
   const ruleEngineRef = useRef<RuleEngine | null>(null);
   const smootherRef = useRef<AngleSmoother>(new AngleSmoother(5));
@@ -194,6 +200,28 @@ export default function LiveCoaching() {
     }
     return () => clearInterval(interval);
   }, [isSessionActive]);
+
+  // Auto-stop session if target duration is reached
+  useEffect(() => {
+    if (isSessionActive && targetDurationSeconds > 0 && sessionTime >= targetDurationSeconds) {
+      handleStartStop();
+    }
+  }, [sessionTime, isSessionActive, targetDurationSeconds]);
+
+  // Countdown effect
+  useEffect(() => {
+    if (countdown === null) return;
+    
+    if (countdown > 0) {
+      const timer = setTimeout(() => {
+        setCountdown(countdown - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    } else {
+      setCountdown(null);
+      startActualSession();
+    }
+  }, [countdown]);
 
   // Handle pose detection results
   const handlePoseResults = (results: PoseLandmarks) => {
@@ -475,9 +503,19 @@ export default function LiveCoaching() {
       }
     };
   }, [isSessionActive, facingMode]);
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
+    
+    // Add remaining time display formatting if duration is set
+    if (targetDurationSeconds > 0 && isSessionActive) {
+      const remaining = Math.max(0, targetDurationSeconds - seconds);
+      const rmins = Math.floor(remaining / 60);
+      const rsecs = remaining % 60;
+      return `${rmins.toString().padStart(2, '0')}:${rsecs.toString().padStart(2, '0')}`;
+    }
+
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
@@ -972,32 +1010,47 @@ export default function LiveCoaching() {
       setCurrentMetrics([]);
       lastValidMetricsRef.current = [];
     } else {
-      // Start session
+      // Start session checks
       if (!selectedActivity) return;
       
-      setIsSessionActive(true);
-      setCurrentMetrics([]);
-      setRealTimeFeedback([]);
-      setCurrentBiomechanics(null);
-      lastValidMetricsRef.current = [];
-      setLiveScore(null);
-      setDetectionStatus('idle');
-      setDetectionMessage('');
-      
-      if (ruleEngineRef.current) {
-        ruleEngineRef.current.reset();
-      }
-      smootherRef.current.reset();
-      activityDetectorRef.current.reset();
-      pipelineRef.current.reset();
-      
-      // Start session aggregator
-      sessionAggregatorRef.current.startSession(selectedActivity.category);
-      sessionStartTimeRef.current = Date.now();
-      
-      // Start video recording
-      // Video recording will be started in accessCamera once the stream is ready
+      setShowDurationModal(true);
     }
+  };
+
+  const confirmStartSession = () => {
+    const mins = parseInt(targetDurationMinutes, 10);
+    if (!isNaN(mins) && mins > 0) {
+      setTargetDurationSeconds(mins * 60);
+    } else {
+      setTargetDurationSeconds(0);
+    }
+    setShowDurationModal(false);
+    setCountdown(5);
+  };
+
+  const startActualSession = () => {
+    setIsSessionActive(true);
+    setCurrentMetrics([]);
+    setRealTimeFeedback([]);
+    setCurrentBiomechanics(null);
+    lastValidMetricsRef.current = [];
+    setLiveScore(null);
+    setDetectionStatus('idle');
+    setDetectionMessage('');
+    
+    if (ruleEngineRef.current) {
+      ruleEngineRef.current.reset();
+    }
+    smootherRef.current.reset();
+    activityDetectorRef.current.reset();
+    pipelineRef.current.reset();
+    
+    // Start session aggregator
+    sessionAggregatorRef.current.startSession(selectedActivity!.category);
+    sessionStartTimeRef.current = Date.now();
+    
+    // Start video recording
+    // Video recording will be started in accessCamera once the stream is ready
   };
 
   // Stop and release camera stream
@@ -1203,6 +1256,84 @@ export default function LiveCoaching() {
   if (selectedActivity) {
     return (
       <div className="fixed inset-0 w-full h-full flex flex-col lg:flex-row overflow-hidden bg-black">
+        {/* Duration Selection Modal */}
+        <AnimatePresence>
+          {showDurationModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+            >
+              <Card variant="glass" className="w-full max-w-sm p-6 text-center">
+                <h3 className="text-xl font-bold text-white mb-2">Session Duration</h3>
+                <p className="text-gray-400 text-sm mb-6">How long do you want to train?</p>
+                
+                <div className="flex justify-center gap-3 mb-6">
+                  {[1, 5, 10, 15].map(min => (
+                    <button
+                      key={min}
+                      onClick={() => setTargetDurationMinutes(min.toString())}
+                      className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold transition-all ${
+                        targetDurationMinutes === min.toString()
+                          ? 'bg-primary-500 text-white shadow-lg shadow-primary-500/20 scale-110'
+                          : 'bg-navy-800 text-gray-400 hover:bg-navy-700'
+                      }`}
+                    >
+                      {min}
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="flex items-center justify-center gap-2 mb-6">
+                  <span className="text-gray-400 text-sm">Custom (min):</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="120"
+                    value={targetDurationMinutes}
+                    onChange={(e) => setTargetDurationMinutes(e.target.value)}
+                    className="bg-navy-900 border border-navy-700 rounded-lg px-3 py-2 text-white w-20 text-center focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none"
+                  />
+                </div>
+
+                <div className="flex gap-3">
+                  <Button variant="secondary" className="flex-1" onClick={() => setShowDurationModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" className="flex-1" onClick={confirmStartSession}>
+                    Start
+                  </Button>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Countdown Overlay */}
+        <AnimatePresence>
+          {countdown !== null && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-md"
+            >
+              <motion.div
+                key={countdown}
+                initial={{ scale: 0.5, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 1.5, opacity: 0 }}
+                transition={{ duration: 0.5 }}
+                className="w-48 h-48 rounded-full bg-primary-500/20 flex flex-col items-center justify-center border-4 border-primary-500 shadow-[0_0_50px_rgba(0,217,255,0.3)]"
+              >
+                <span className="text-7xl font-black text-white">{countdown > 0 ? countdown : 'Go!'}</span>
+                {countdown > 0 && <span className="text-primary-300 text-sm font-bold uppercase tracking-widest mt-2">{countdown === 5 ? 'Get ready' : 'Starting...'}</span>}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Camera Section */}
         <div className="flex-1 flex flex-col bg-black relative min-h-0">
           {/* Header with Back Button */}
