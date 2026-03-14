@@ -102,10 +102,10 @@ export interface SessionMetrics {
   // Total violation count (sum of all violation counts)
   totalViolations: number;
   
-  // Performance score (0-100, higher is better)
+  // Performance score (0-100, higher is better, null = not enough data)
   // Calculated as: (goodFrames / totalScoredFrames) * 100
   // A "good frame" has no active violations during activity performance.
-  performanceScore: number;
+  performanceScore: number | null;
 
   // Frame-quality breakdown (optional — not present in old sessions)
   /** Total frames where athlete was actively performing the exercise */
@@ -203,14 +203,16 @@ export function generateSessionId(): string {
  *  - goodFrames:       frames with no violations during active exercise
  *  - totalScoredFrames: frames where the athlete was actively performing
  *
- * Returns 100 (neutral) when no scored frames available yet.
+ * Returns null when no scored frames available yet (UI should show "Waiting...").
+ * Requires at least 10 scored frames before producing a score to avoid
+ * volatile early readings.
  */
 export function calculatePerformanceScore(
   goodFrames: number,
   totalScoredFrames: number
-): number {
-  if (totalScoredFrames === 0) return 100;
-  return Math.round(Math.min(100, Math.max(0, (goodFrames / totalScoredFrames) * 100)))
+): number | null {
+  if (totalScoredFrames < 10) return null; // not enough data yet
+  return Math.round(Math.min(100, Math.max(0, (goodFrames / totalScoredFrames) * 100)));
 }
 
 /**

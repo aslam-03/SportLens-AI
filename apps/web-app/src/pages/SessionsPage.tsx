@@ -61,7 +61,7 @@ export default function Sessions() {
             duration: `${minutes} mins`,
             type: activityInfo.type,
             status: 'completed',
-            performanceScore: s.metrics?.performanceScore
+            performanceScore: s.metrics?.performanceScore ?? undefined
           };
         });
 

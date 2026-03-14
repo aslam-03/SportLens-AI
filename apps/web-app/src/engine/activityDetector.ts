@@ -1,27 +1,28 @@
 /**
  * ═══════════════════════════════════════════════════════════════════
- * ACTIVITY DETECTOR — Real-World Action Recognition
+ * ACTIVITY DETECTOR — Production-Grade Action Recognition & Scoring
  * ═══════════════════════════════════════════════════════════════════
  *
  * Determines:
- *   1. Is a human present in the frame? (quick visibility check)
- *   2. Is the person actually performing the selected activity?
- *   3. What per-frame quality score should this frame receive?
+ *   1. Is a human present in the frame? (strict visibility check)
+ *   2. Is the person performing the selected activity?
+ *   3. What is the per-frame quality score (0-100)?
  *
- * This replaces the "always 100" scoring bug with a meaningful
- * frame-quality percentage system.
+ * Scoring Model (replaces the old "100 unless violation" system):
  *
- * Activity heuristics:
- *  ┌─────────────────────────────────────────────────────────────┐
- *  │  Fitness / Squat                                            │
- *  │  • Performing: min knee angle in window < 140° (bending)   │
- *  │  • Idle:       both knees > 155° (standing straight)       │
- *  └─────────────────────────────────────────────────────────────┘
- *  ┌─────────────────────────────────────────────────────────────┐
- *  │  Cricket / Bowling                                          │
- *  │  • Performing: wrist above shoulder OR shoulder range > 30° │
- *  │  • Idle:       standing neutral with no arm raise           │
- *  └─────────────────────────────────────────────────────────────┘
+ *   Frame Score = weighted combination of:
+ *     - Form Quality (50%): how close angles are to ideal ranges
+ *     - Stability    (20%): smoothness of movement (low jitter)
+ *     - Violations   (30%): penalty from rule engine violations
+ *
+ * Activity Heuristics:
+ *   Fitness/Squat:
+ *     Performing → min knee angle in window < 140° (bending)
+ *     Idle       → both knees > 158° (standing straight)
+ *
+ *   Cricket/Bowling:
+ *     Performing → wrist above shoulder OR shoulder range > 30°
+ *     Idle       → standing neutral with no arm raise
  */
 
 import { BiomechanicsFrame } from '../Biomechanics/angleCalculator';
@@ -60,6 +61,16 @@ const CRICKET_WRIST_ABOVE_SHOULDER_MARGIN = 0.04; // normalized y offset
 /** Number of recent angles to keep for rolling window analysis */
 const WINDOW_SIZE = 15; // ~0.5s at 30fps
 
+// ─── Ideal angle ranges for scoring ─────────────────────────────
+// Squat ideal ranges (degrees)
+const SQUAT_KNEE_IDEAL   = { min: 75,  max: 100,  perfect: 90 };
+const SQUAT_HIP_IDEAL    = { min: 70,  max: 120,  perfect: 95 };
+const SQUAT_BACK_IDEAL   = { min: 50,  max: 90,   perfect: 70 };
+
+// Bowling ideal ranges (degrees)
+const BOWL_ELBOW_IDEAL     = { min: 160, max: 180, perfect: 175 };
+const BOWL_SHOULDER_IDEAL  = { min: 140, max: 180, perfect: 165 };
+
 // ─────────────────────────────────────────────────────────────────
 // Activity Detector Class
 // ─────────────────────────────────────────────────────────────────
@@ -75,7 +86,12 @@ export class ActivityDetector {
 
   // Running counters for scoring
   private totalScoredFrames  = 0;
-  private goodFrames         = 0;
+  private totalScore         = 0;
+
+  // Stability tracking — measures jitter in angles
+  private prevFrame: BiomechanicsFrame | null = null;
+  private jitterWindow: number[] = [];
+  private readonly JITTER_WINDOW_SIZE = 10;
 
   // Debug counter to throttle console logs
   private _debugCounter = 0;
@@ -102,16 +118,18 @@ export class ActivityDetector {
     this.leftShoulderWindow  = [];
     this.rightShoulderWindow = [];
     this.totalScoredFrames   = 0;
-    this.goodFrames          = 0;
+    this.totalScore          = 0;
     this._debugCounter       = 0;
     this.prevLandmarks       = null;
     this.velocityWindow      = [];
+    this.prevFrame           = null;
+    this.jitterWindow        = [];
   }
 
   /** Compute overall session performance score (0-100) */
   getSessionScore(): number {
-    if (this.totalScoredFrames === 0) return 100; // no data yet — neutral
-    return Math.round((this.goodFrames / this.totalScoredFrames) * 100);
+    if (this.totalScoredFrames === 0) return 0; // no data = 0, not 100
+    return Math.round(this.totalScore / this.totalScoredFrames);
   }
 
   /** Total frames analysed for scoring */
@@ -123,10 +141,6 @@ export class ActivityDetector {
    * ═══════════════════════════════════════════════════════════════
    * MAIN EVALUATION
    * ═══════════════════════════════════════════════════════════════
-   *
-   * @param frame       Biomechanics angles for current frame
-   * @param landmarks   Raw pose landmarks for position checks
-   * @param violations  Active rule violations in this frame
    */
   evaluate(
     frame:      BiomechanicsFrame | null,
@@ -182,9 +196,9 @@ export class ActivityDetector {
 
     // ── 3. Activity-specific detection ───────────────────────────
     if (this.activity === 'fitness') {
-      return this.evaluateSquat(violations, velocity);
+      return this.evaluateSquat(frame, violations, velocity);
     } else {
-      return this.evaluateCricketBowling(landmarks, violations, velocity);
+      return this.evaluateCricketBowling(frame, landmarks, violations, velocity);
     }
   }
 
@@ -192,8 +206,12 @@ export class ActivityDetector {
   // Private — Squat Detection
   // ─────────────────────────────────────────────────────────────
 
-  private evaluateSquat(violations: RuleViolation[], velocity: number): ActivityDetectionResult {
-    // ── Use whichever knee side has data (fixes NaN when only one side visible) ──
+  private evaluateSquat(
+    frame: BiomechanicsFrame | null,
+    violations: RuleViolation[],
+    velocity: number
+  ): ActivityDetectionResult {
+    // ── Use whichever knee side has data ──
     const hasLeft  = this.leftKneeWindow.length > 0;
     const hasRight = this.rightKneeWindow.length > 0;
 
@@ -210,10 +228,8 @@ export class ActivityDetector {
       minKnee = this.windowMin(this.rightKneeWindow);
       avgKnee = this.windowAvg(this.rightKneeWindow);
     } else {
-      // No knee data at all — check if hip angles show movement as fallback
       const hasHipData = this.leftShoulderWindow.length > 0 || this.rightShoulderWindow.length > 0;
       if (hasHipData) {
-        // Hip/shoulder movement detected but no knee data — likely legs are partially occluded
         return {
           status: 'idle',
           message: 'Knees not visible — adjust camera to show your full body.',
@@ -229,7 +245,7 @@ export class ActivityDetector {
       };
     }
 
-    // Safety check (shouldn't happen now, but guard against edge cases)
+    // Safety check
     if (!isFinite(minKnee) || !isFinite(avgKnee)) {
       return {
         status: 'idle',
@@ -239,16 +255,15 @@ export class ActivityDetector {
       };
     }
 
-    // Debug logging (every ~30 frames to avoid flooding)
+    // Debug logging (every ~30 frames)
     if (this._debugCounter++ % 30 === 0) {
-      console.log(`[ActivityDetector] Squat check — minKnee: ${minKnee.toFixed(1)}°, avgKnee: ${avgKnee.toFixed(1)}°, L-window: ${this.leftKneeWindow.length}, R-window: ${this.rightKneeWindow.length}, threshold: <${SQUAT_ACTIVE_KNEE_THRESHOLD}° = squatting, >${SQUAT_IDLE_KNEE_THRESHOLD}° = idle`);
+      console.log(`[ActivityDetector] Squat check — minKnee: ${minKnee.toFixed(1)}°, avgKnee: ${avgKnee.toFixed(1)}°, L-window: ${this.leftKneeWindow.length}, R-window: ${this.rightKneeWindow.length}`);
     }
 
     const isSquatting = minKnee < SQUAT_ACTIVE_KNEE_THRESHOLD;
     const isIdle      = avgKnee > SQUAT_IDLE_KNEE_THRESHOLD;
 
-    // Velocity fallback: if angles say "idle" but body is clearly moving,
-    // treat as "performing" (catches partial squats, transitions, warm-up moves)
+    // Velocity fallback
     const avgVelocity = this.windowAvg(this.velocityWindow);
     const significantMovement = isFinite(avgVelocity) && avgVelocity > 0.005;
 
@@ -263,18 +278,21 @@ export class ActivityDetector {
 
     // If knee angles say idle but velocity is high → person is moving/transitioning
     if (isIdle && !isSquatting && significantMovement) {
+      const transitionScore = this.computeContinuousFrameScore('fitness', frame, violations);
+      this.totalScoredFrames++;
+      this.totalScore += transitionScore;
       return {
         status: 'performing',
-        message: 'Movement detected — performing exercise (bend deeper for better score)',
+        message: `Movement detected — bend deeper for better score (${transitionScore}/100)`,
         severity: 'info',
-        frameQualityScore: 40,  // Lower score since form isn't in ideal range yet
+        frameQualityScore: transitionScore,
       };
     }
 
     // Person is performing a squat or transitioning
-    const frameScore = this.computeFrameScore(violations);
+    const frameScore = this.computeContinuousFrameScore('fitness', frame, violations);
     this.totalScoredFrames++;
-    if (frameScore >= 80) this.goodFrames++;
+    this.totalScore += frameScore;
 
     const errorViolations   = violations.filter(v => v.severity === 'error').length;
     const warningViolations = violations.filter(v => v.severity === 'warning').length;
@@ -282,7 +300,7 @@ export class ActivityDetector {
     if (errorViolations > 0) {
       return {
         status: 'performing',
-        message: `Squat detected — fix critical form errors  (score: ${frameScore}/100)`,
+        message: `Fix critical form errors (score: ${frameScore}/100)`,
         severity: 'error',
         frameQualityScore: frameScore,
       };
@@ -291,16 +309,35 @@ export class ActivityDetector {
     if (warningViolations > 0) {
       return {
         status: 'performing',
-        message: `Squat in progress — improve your form  (score: ${frameScore}/100)`,
+        message: `Improve your form (score: ${frameScore}/100)`,
         severity: 'warning',
+        frameQualityScore: frameScore,
+      };
+    }
+
+    // Classify score into feedback tiers
+    if (frameScore >= 85) {
+      return {
+        status: 'performing',
+        message: `Excellent form! (score: ${frameScore}/100)`,
+        severity: 'info',
+        frameQualityScore: frameScore,
+      };
+    }
+
+    if (frameScore >= 65) {
+      return {
+        status: 'performing',
+        message: `Good form — keep it up! (score: ${frameScore}/100)`,
+        severity: 'info',
         frameQualityScore: frameScore,
       };
     }
 
     return {
       status: 'performing',
-      message: `Perfect squat form!  (score: ${frameScore}/100)`,
-      severity: 'info',
+      message: `Working on form (score: ${frameScore}/100)`,
+      severity: 'warning',
       frameQualityScore: frameScore,
     };
   }
@@ -310,12 +347,11 @@ export class ActivityDetector {
   // ─────────────────────────────────────────────────────────────
 
   private evaluateCricketBowling(
+    frame: BiomechanicsFrame | null,
     landmarks: Landmark[],
     violations: RuleViolation[],
     velocity: number
   ): ActivityDetectionResult {
-    // Check if wrist has been raised above shoulder (key bowling cue)
-    // Check BOTH sides — supports left-handed and right-handed bowlers
     const rightShoulder = landmarks[LANDMARK_INDICES.RIGHT_SHOULDER];
     const leftShoulder  = landmarks[LANDMARK_INDICES.LEFT_SHOULDER];
     const rightWrist    = landmarks[LANDMARK_INDICES.RIGHT_WRIST];
@@ -330,19 +366,16 @@ export class ActivityDetector {
 
     let armRaised = false;
 
-    // Right side: wrist above right shoulder
     if (rightShoulder && rightWrist) {
       if (rightWrist.y < rightShoulder.y + CRICKET_WRIST_ABOVE_SHOULDER_MARGIN) {
         armRaised = true;
       }
     }
-    // Left side: wrist above left shoulder
     if (!armRaised && leftShoulder && leftWrist) {
       if (leftWrist.y < leftShoulder.y + CRICKET_WRIST_ABOVE_SHOULDER_MARGIN) {
         armRaised = true;
       }
     }
-    // Cross-check: either wrist above either shoulder
     if (!armRaised) {
       const anyShoulder = rightShoulder || leftShoulder;
       if (anyShoulder) {
@@ -355,23 +388,21 @@ export class ActivityDetector {
 
     const shoulderRotating = shoulderRange > 30;
 
-    // Debug logging
     if (this._debugCounter % 30 === 0) {
-      console.log(`[ActivityDetector] Cricket check — armRaised: ${armRaised}, shoulderRange: ${shoulderRange.toFixed(1)}°, shoulderRotating: ${shoulderRotating}, L-shoulder-window: ${this.leftShoulderWindow.length}, R-shoulder-window: ${this.rightShoulderWindow.length}`);
+      console.log(`[ActivityDetector] Cricket check — armRaised: ${armRaised}, shoulderRange: ${shoulderRange.toFixed(1)}°, shoulderRotating: ${shoulderRotating}`);
     }
 
     if (!armRaised && !shoulderRotating) {
-      // Velocity fallback: if pose angles don't detect bowling but body is moving fast
       const avgVelocity = this.windowAvg(this.velocityWindow);
       const significantMovement = isFinite(avgVelocity) && avgVelocity > 0.008;
 
       if (significantMovement) {
-        const frameScore = this.computeFrameScore(violations);
+        const frameScore = this.computeContinuousFrameScore('cricket', frame, violations);
         this.totalScoredFrames++;
-        if (frameScore >= 80) this.goodFrames++;
+        this.totalScore += frameScore;
         return {
           status: 'performing',
-          message: `Athletic movement detected — analyzing action (score: ${frameScore}/100)`,
+          message: `Athletic movement detected (score: ${frameScore}/100)`,
           severity: 'info',
           frameQualityScore: frameScore,
         };
@@ -385,23 +416,33 @@ export class ActivityDetector {
       };
     }
 
-    const frameScore = this.computeFrameScore(violations);
+    const frameScore = this.computeContinuousFrameScore('cricket', frame, violations);
     this.totalScoredFrames++;
-    if (frameScore >= 80) this.goodFrames++;
+    this.totalScore += frameScore;
 
     const errorViolations = violations.filter(v => v.severity === 'error').length;
+
     if (errorViolations > 0) {
       return {
         status: 'performing',
-        message: `Bowling action detected — fix illegal action  (score: ${frameScore}/100)`,
+        message: `Fix illegal action (score: ${frameScore}/100)`,
         severity: 'error',
+        frameQualityScore: frameScore,
+      };
+    }
+
+    if (frameScore >= 85) {
+      return {
+        status: 'performing',
+        message: `Excellent bowling form! (score: ${frameScore}/100)`,
+        severity: 'info',
         frameQualityScore: frameScore,
       };
     }
 
     return {
       status: 'performing',
-      message: `Bowling action in progress  (score: ${frameScore}/100)`,
+      message: `Bowling action in progress (score: ${frameScore}/100)`,
       severity: violations.length > 0 ? 'warning' : 'info',
       frameQualityScore: frameScore,
     };
@@ -413,18 +454,9 @@ export class ActivityDetector {
 
   /**
    * Strict human-presence gate — prevents skeletons on non-human objects.
-   *
-   * Requires ALL of the following:
-   *  1. At least 6 of 8 major body joints visible at ≥ 0.5 confidence
-   *  2. Both shoulders visible at ≥ 0.5 (upper-body anchor)
-   *  3. At least one hip visible at ≥ 0.5 (torso anchor)
-   *  4. Mean confidence of the 8 joints ≥ 0.45
-   *  5. Torso geometry: shoulders y < hips y (person is upright, not inverted noise)
-   *
-   * This prevents MediaPipe from "finding" a pose on chairs, walls, or props.
    */
   private isHumanPresent(landmarks: Landmark[]): boolean {
-    const VIS_THRESHOLD = 0.35;  // lowered from 0.50 — during movement visibility drops
+    const VIS_THRESHOLD = 0.35;
 
     const criticalIndices = [
       LANDMARK_INDICES.LEFT_SHOULDER,
@@ -437,7 +469,6 @@ export class ActivityDetector {
       LANDMARK_INDICES.RIGHT_ANKLE,
     ];
 
-    // Gate 1: At least 4 / 8 joints at sufficient visibility (was 6 — too strict during motion)
     let visibleCount = 0;
     let visibilitySum = 0;
     for (const idx of criticalIndices) {
@@ -447,28 +478,23 @@ export class ActivityDetector {
     }
     if (visibleCount < 4) return false;
 
-    // Gate 2: At least ONE shoulder must be visible (was both — too strict during turns/movement)
     const lShoulderVis = (landmarks[LANDMARK_INDICES.LEFT_SHOULDER]?.visibility ?? 0);
     const rShoulderVis = (landmarks[LANDMARK_INDICES.RIGHT_SHOULDER]?.visibility ?? 0);
     if (lShoulderVis < VIS_THRESHOLD && rShoulderVis < VIS_THRESHOLD) return false;
 
-    // Gate 3: At least one hip visible (torso anchor)
     const lHipVis = (landmarks[LANDMARK_INDICES.LEFT_HIP]?.visibility ?? 0);
     const rHipVis = (landmarks[LANDMARK_INDICES.RIGHT_HIP]?.visibility ?? 0);
     if (lHipVis < VIS_THRESHOLD && rHipVis < VIS_THRESHOLD) return false;
 
-    // Gate 4: Mean confidence of all 8 joints must be ≥ 0.30 (was 0.45)
     const meanVis = visibilitySum / criticalIndices.length;
     if (meanVis < 0.30) return false;
 
-    // Gate 5: Torso geometry — shoulders should be ABOVE hips in frame
-    // (MediaPipe normalized y: 0 = top, 1 = bottom, so shoulder.y < hip.y is upright)
+    // Torso geometry — shoulders should be ABOVE hips
     const lShoulder = landmarks[LANDMARK_INDICES.LEFT_SHOULDER];
     const rShoulder = landmarks[LANDMARK_INDICES.RIGHT_SHOULDER];
     const lHip = landmarks[LANDMARK_INDICES.LEFT_HIP];
     const rHip = landmarks[LANDMARK_INDICES.RIGHT_HIP];
 
-    // Only check geometry if we have confident enough data for both sides
     const haveBothSides = (lShoulderVis >= VIS_THRESHOLD || rShoulderVis >= VIS_THRESHOLD)
                        && (lHipVis >= VIS_THRESHOLD || rHipVis >= VIS_THRESHOLD);
     if (haveBothSides) {
@@ -477,7 +503,6 @@ export class ActivityDetector {
       if (shoulders.length > 0 && hips.length > 0) {
         const avgShoulderY = shoulders.reduce((s, lm) => s + lm!.y, 0) / shoulders.length;
         const avgHipY = hips.reduce((s, lm) => s + lm!.y, 0) / hips.length;
-        // Shoulders must be above hips (with small tolerance)
         if (avgShoulderY > avgHipY + 0.02) return false;
       }
     }
@@ -493,12 +518,12 @@ export class ActivityDetector {
     }
   }
 
-  /** Minimum value in window (Infinity if empty) */
+  /** Minimum value in window */
   private windowMin(window: number[]): number {
     return window.length > 0 ? Math.min(...window) : Infinity;
   }
 
-  /** Average value in window (NaN if empty) */
+  /** Average value in window */
   private windowAvg(window: number[]): number {
     if (window.length === 0) return NaN;
     return window.reduce((a, b) => a + b, 0) / window.length;
@@ -512,8 +537,6 @@ export class ActivityDetector {
 
   /**
    * Compute total body velocity from landmark displacement between frames.
-   * Returns normalized velocity (0 = no movement, higher = faster movement).
-   * Tracks key joints: shoulders, hips, knees, wrists.
    */
   private computeBodyVelocity(landmarks: Landmark[]): number {
     if (!this.prevLandmarks || this.prevLandmarks.length === 0) {
@@ -549,21 +572,221 @@ export class ActivityDetector {
     return count > 0 ? totalDisplacement / count : 0;
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // PRODUCTION-GRADE CONTINUOUS FRAME SCORING
+  // ═══════════════════════════════════════════════════════════════
+
   /**
-   * Per-frame quality score based on violations:
-   *  - No violations        → 100
-   *  - Info violations      → 85
-   *  - Warning violations   → 60
-   *  - Error violations     → 20
+   * Compute a continuous 0-100 frame quality score based on:
+   *   - Form Quality (50%): how close angles are to ideal ranges
+   *   - Stability    (20%): how smooth/steady the movement is
+   *   - Violations   (30%): penalty from rule engine violations
+   *
+   * This replaces the old "100 unless violation" approach.
    */
-  private computeFrameScore(violations: RuleViolation[]): number {
+  private computeContinuousFrameScore(
+    activity: 'fitness' | 'cricket',
+    frame: BiomechanicsFrame | null,
+    violations: RuleViolation[]
+  ): number {
+    // ── 1. Form Quality Score (0-100) ────────────────────────────
+    const formScore = activity === 'fitness'
+      ? this.computeSquatFormScore(frame)
+      : this.computeBowlingFormScore(frame);
+
+    // ── 2. Stability Score (0-100) ───────────────────────────────
+    const stabilityScore = this.computeStabilityScore(frame);
+
+    // ── 3. Violation Penalty (0-100, 100 = no violations) ────────
+    const violationScore = this.computeViolationScore(violations);
+
+    // ── Weighted combination ─────────────────────────────────────
+    const combined = (formScore * 0.50) + (stabilityScore * 0.20) + (violationScore * 0.30);
+
+    // Store previous frame for next stability check
+    if (frame) {
+      this.prevFrame = { ...frame };
+    }
+
+    const finalScore = Math.round(Math.max(0, Math.min(100, combined)));
+
+    // Debug logging
+    if (this._debugCounter % 30 === 0) {
+      console.log(`[ActivityDetector] Score breakdown — form: ${formScore.toFixed(0)}, stability: ${stabilityScore.toFixed(0)}, violations: ${violationScore.toFixed(0)} → ${finalScore}`);
+    }
+
+    return finalScore;
+  }
+
+  /**
+   * Score how close squat form is to ideal angles.
+   * Uses a bell-curve-like scoring around ideal ranges.
+   */
+  private computeSquatFormScore(frame: BiomechanicsFrame | null): number {
+    if (!frame) return 30; // no data = low score, not 100
+
+    const scores: number[] = [];
+
+    // Knee angle score
+    const kneeAngle = frame.leftKneeAngle ?? frame.rightKneeAngle;
+    if (kneeAngle !== null && isFinite(kneeAngle)) {
+      scores.push(this.angleToScore(kneeAngle, SQUAT_KNEE_IDEAL));
+    }
+
+    // Hip angle score
+    const hipAngle = frame.leftHipAngle ?? frame.rightHipAngle;
+    if (hipAngle !== null && isFinite(hipAngle)) {
+      scores.push(this.angleToScore(hipAngle, SQUAT_HIP_IDEAL));
+    }
+
+    // Back angle score (shoulder angle indicates torso position)
+    const backAngle = frame.leftShoulderAngle ?? frame.rightShoulderAngle;
+    if (backAngle !== null && isFinite(backAngle)) {
+      scores.push(this.angleToScore(backAngle, SQUAT_BACK_IDEAL));
+    }
+
+    if (scores.length === 0) return 30;
+
+    // Weighted average: knee is most important for squats
+    if (scores.length >= 3) {
+      return scores[0] * 0.5 + scores[1] * 0.3 + scores[2] * 0.2;
+    }
+    if (scores.length === 2) {
+      return scores[0] * 0.6 + scores[1] * 0.4;
+    }
+    return scores[0];
+  }
+
+  /**
+   * Score how close bowling form is to ideal angles.
+   */
+  private computeBowlingFormScore(frame: BiomechanicsFrame | null): number {
+    if (!frame) return 30;
+
+    const scores: number[] = [];
+
+    // Elbow angle (straight arm is ideal for bowling)
+    const elbowAngle = frame.leftElbowAngle ?? frame.rightElbowAngle;
+    if (elbowAngle !== null && isFinite(elbowAngle)) {
+      scores.push(this.angleToScore(elbowAngle, BOWL_ELBOW_IDEAL));
+    }
+
+    // Shoulder angle
+    const shoulderAngle = frame.leftShoulderAngle ?? frame.rightShoulderAngle;
+    if (shoulderAngle !== null && isFinite(shoulderAngle)) {
+      scores.push(this.angleToScore(shoulderAngle, BOWL_SHOULDER_IDEAL));
+    }
+
+    if (scores.length === 0) return 30;
+    return scores.reduce((a, b) => a + b, 0) / scores.length;
+  }
+
+  /**
+   * Convert an angle measurement to a 0-100 score based on how close
+   * it is to an ideal range. Uses a smooth bell-curve-like function.
+   *
+   *   100 |    ┌──────┐
+   *    80 |   ╱        ╲
+   *    60 |  ╱          ╲
+   *    40 | ╱            ╲
+   *    20 |╱              ╲
+   *     0 |________________
+   *       far  ideal  far
+   */
+  private angleToScore(
+    angle: number,
+    ideal: { min: number; max: number; perfect: number }
+  ): number {
+    // Inside ideal range = score 80-100
+    if (angle >= ideal.min && angle <= ideal.max) {
+      // How close to the perfect center? Closer = higher
+      const distFromPerfect = Math.abs(angle - ideal.perfect);
+      const rangeHalf = (ideal.max - ideal.min) / 2;
+      const centralScore = rangeHalf > 0
+        ? Math.max(0, 1 - (distFromPerfect / rangeHalf))
+        : 1;
+      return 80 + centralScore * 20; // 80-100
+    }
+
+    // Outside ideal range — score drops sharply with distance
+    const distFromIdeal = angle < ideal.min
+      ? ideal.min - angle
+      : angle - ideal.max;
+
+    // Start dropping from 70 to create a clear gap between "in range" and "out of range"
+    // Every 5° outside ideal loses ~15 points instead of 10° losing 15 points
+    const penalty = Math.min(70, Math.floor(distFromIdeal / 5) * 15);
+    return Math.max(0, 70 - penalty);
+  }
+
+  /**
+   * Measure movement stability. Smooth, controlled movement scores high.
+   * Jerky, inconsistent movement scores low.
+   */
+  private computeStabilityScore(frame: BiomechanicsFrame | null): number {
+    if (!frame || !this.prevFrame) return 70; // neutral when no history
+
+    // Compute angle jitter (sum of absolute changes)
+    let jitter = 0;
+    let count = 0;
+
+    const pairs: Array<[keyof BiomechanicsFrame, keyof BiomechanicsFrame]> = [
+      ['leftKneeAngle', 'leftKneeAngle'],
+      ['rightKneeAngle', 'rightKneeAngle'],
+      ['leftHipAngle', 'leftHipAngle'],
+      ['rightHipAngle', 'rightHipAngle'],
+      ['leftShoulderAngle', 'leftShoulderAngle'],
+      ['rightShoulderAngle', 'rightShoulderAngle'],
+    ];
+
+    for (const [currKey, prevKey] of pairs) {
+      const currVal = frame[currKey as keyof BiomechanicsFrame];
+      const prevVal = this.prevFrame[prevKey as keyof BiomechanicsFrame];
+      if (
+        typeof currVal === 'number' && typeof prevVal === 'number' &&
+        isFinite(currVal) && isFinite(prevVal)
+      ) {
+        jitter += Math.abs(currVal - prevVal);
+        count++;
+      }
+    }
+
+    if (count === 0) return 70;
+
+    const avgJitter = jitter / count;
+    this.jitterWindow.push(avgJitter);
+    if (this.jitterWindow.length > this.JITTER_WINDOW_SIZE) {
+      this.jitterWindow.shift();
+    }
+
+    // Average jitter over the window
+    const smoothedJitter = this.jitterWindow.reduce((a, b) => a + b, 0) / this.jitterWindow.length;
+
+    // < 2° of jitter = smooth, 100
+    // 2-5° = good, 80-100
+    // 5-10° = ok, 50-80
+    // > 10° = jerky, <50
+    if (smoothedJitter < 2) return 100;
+    if (smoothedJitter < 5) return 80;
+    if (smoothedJitter < 10) return 50;
+    return Math.max(0, 30 - (smoothedJitter - 10) * 3);
+  }
+
+  /**
+   * Score based on rule violations.
+   *   - No violations        → 100
+   *   - Info violations      → 85
+   *   - Warning violations   → 55-70
+   *   - Error violations     → 10-30
+   */
+  private computeViolationScore(violations: RuleViolation[]): number {
     const errors   = violations.filter(v => v.severity === 'error').length;
     const warnings = violations.filter(v => v.severity === 'warning').length;
     const infos    = violations.filter(v => v.severity === 'info').length;
 
-    if (errors > 0)   return Math.max(0, 20 - errors * 5);
-    if (warnings > 0) return Math.max(0, 60 - warnings * 10);
-    if (infos > 0)    return 85;
+    if (errors > 0)   return 0;        // Strict penalty for errors
+    if (warnings > 0) return Math.max(0, 40 - warnings * 10); // Severe penalty for bad form
+    if (infos > 0)    return 70;
     return 100;
   }
 }

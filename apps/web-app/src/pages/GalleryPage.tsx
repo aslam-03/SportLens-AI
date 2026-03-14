@@ -65,7 +65,7 @@ export default function GalleryPage() {
             }),
             duration: `${Math.round(s.duration / 60)} mins`,
             videoUrl: s.r2Objects!.videoUrl!,
-            performanceScore: s.metrics?.performanceScore
+            performanceScore: s.metrics?.performanceScore ?? undefined
           };
         });
 

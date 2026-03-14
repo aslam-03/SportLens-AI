@@ -75,7 +75,7 @@ export default function Home() {
         let totalScore = 0;
         let scoreCount = 0;
         sessions.forEach(s => {
-          if (s.metrics?.performanceScore !== undefined) {
+          if (s.metrics?.performanceScore != null) {
             totalScore += s.metrics.performanceScore;
             scoreCount++;
           }

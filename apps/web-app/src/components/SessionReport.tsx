@@ -22,7 +22,8 @@ function buildFilename(session: Session): string {
   return `sportlens-session-report-${iso}.pdf`;
 }
 
-function getRating(score: number): string {
+function getRating(score: number | null): string {
+  if (score === null) return 'Insufficient Data';
   if (score >= 90) return 'Excellent';
   if (score >= 75) return 'Good';
   if (score >= 60) return 'Needs Improvement';
@@ -162,7 +163,7 @@ export default function SessionReport({ session }: SessionReportProps) {
           <div style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: 12 }}>
             <p style={{ margin: 0, fontSize: 11, color: '#6b7280' }}>Performance Score</p>
             <p style={{ margin: '6px 0 0', fontSize: 16, fontWeight: 700 }}>
-              {session.metrics.performanceScore} ({rating})
+              {session.metrics.performanceScore ?? 'N/A'} ({rating})
             </p>
           </div>
           <div style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: 12 }}>

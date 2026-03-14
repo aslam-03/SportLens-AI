@@ -40,9 +40,9 @@ export const Sidebar = ({ onLogout }: SidebarProps) => {
   };
 
   return (
-    <div className="hidden lg:flex lg:flex-col lg:w-64 lg:bg-primary-700 lg:border-r lg:border-primary-600/50 lg:fixed lg:inset-y-0 lg:z-50">
+    <div className="hidden lg:flex lg:flex-col lg:w-64 lg:bg-navy-950 lg:border-r lg:border-navy-800 lg:fixed lg:inset-y-0 lg:z-50">
       {/* Logo */}
-      <div className="flex-shrink-0 px-6 py-5 border-b border-primary-600/50">
+      <div className="flex-shrink-0 px-6 py-5 border-b border-navy-800">
         <h1 className="text-xl font-semibold text-white">SportLens AI</h1>
         <p className="text-xs text-gray-300 mt-1">Real-time Coaching</p>
       </div>
@@ -62,8 +62,8 @@ export const Sidebar = ({ onLogout }: SidebarProps) => {
                 'text-left text-sm font-medium transition-colors duration-150',
                 'focus:outline-none focus:ring-2 focus:ring-primary-400',
                 active
-                  ? 'bg-primary-600 text-white shadow-sm'
-                  : 'text-gray-300 hover:bg-primary-600/50 hover:text-white'
+                  ? 'bg-navy-900 border-l-2 border-primary-500 text-white shadow-sm'
+                  : 'text-gray-400 hover:bg-navy-900 hover:text-white'
               )}
             >
               <IconComponent size="md" />
@@ -74,10 +74,10 @@ export const Sidebar = ({ onLogout }: SidebarProps) => {
       </nav>
 
       {/* Footer Actions */}
-      <div className="flex-shrink-0 border-t border-primary-600/50 p-3">
+      <div className="flex-shrink-0 border-t border-navy-800 p-3">
         <button
           onClick={onLogout}
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-gray-300 hover:bg-primary-600/50 hover:text-white transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-primary-400"
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-gray-400 hover:bg-navy-900 hover:text-white transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-primary-400"
         >
           <Icons.LogOut size="md" />
           <span>Log Out</span>
