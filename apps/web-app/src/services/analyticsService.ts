@@ -19,7 +19,7 @@ export interface SessionTimelineItem {
   label: string;
   activityType: Session['activityType'];
   duration: number;
-  performanceScore: number;
+  performanceScore: number | null;
   totalViolations: number;
   avgKneeAngle: number | null;
   avgHipAngle: number | null;
@@ -107,7 +107,7 @@ export function buildAnalytics(sessions: Session[]): AnalyticsData {
       label: toSessionLabel(session, index),
       activityType: session.activityType,
       duration: session.duration,
-      performanceScore: session.metrics.performanceScore,
+      performanceScore: session.metrics.performanceScore ?? 0,
       totalViolations: session.metrics.totalViolations,
       avgKneeAngle: avgKneeAngle === null ? null : round(avgKneeAngle),
       avgHipAngle: avgHipAngle === null ? null : round(avgHipAngle),
@@ -124,7 +124,7 @@ export function buildAnalytics(sessions: Session[]): AnalyticsData {
   const hipValues = timeline
     .map((item) => item.avgHipAngle)
     .filter((value): value is number => value !== null);
-  const scoreValues = timeline.map((item) => item.performanceScore);
+  const scoreValues = timeline.map((item) => item.performanceScore).filter((v): v is number => v !== null);
 
   const averageKnee = average(kneeValues);
   const averageHip = average(hipValues);

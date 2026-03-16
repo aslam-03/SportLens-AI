@@ -1,13 +1,15 @@
-﻿/**
+/**
  * Session Aggregator for SportLens AI
  *
  * Handles real-time aggregation of biomechanical metrics during a training
- * session. Now uses frame-quality based scoring instead of violation count
- * penalty â€” giving meaningful 0-100 scores that reflect true performance.
+ * session. Uses frame-quality based scoring with exponential moving average
+ * for responsive, stable live scores.
  *
  * Key Design Decisions:
- * - Running statistics (no raw frames stored â€” O(1) memory)
+ * - Running statistics (no raw frames stored — O(1) memory)
  * - Frame-quality scoring: (goodFrames / totalScoredFrames) * 100
+ * - EMA-based live score for smooth, responsive display
+ * - Returns null when insufficient data (no misleading 100)
  * - Distinguishes: no_human / idle / performing frames
  */
 
@@ -78,15 +80,19 @@ export class SessionAggregator {
   private violationCounts: ViolationCounts = {};
   private totalFrames = 0;
 
-  // Frame-quality scoring (replaces penalty system)
+  // Frame-quality scoring
   private totalScoredFrames = 0;   // frames where activity was detected
-  private goodFrames        = 0;   // scored frames with quality >= 80
+  private goodFrames        = 0;   // scored frames with quality >= 60
   private noHumanFrames     = 0;   // frames with no human detected
   private idleFrames        = 0;   // frames where human was idle
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // EMA-based live score for smooth, responsive display
+  private emaScore: number | null = null;
+  private readonly EMA_ALPHA = 0.08; // low alpha = more smoothing
+
+  // ─────────────────────────────────────────────────────────────
   // Public API
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────
 
   startSession(activityType: ActivityType): SessionInProgress {
     this.reset();
@@ -135,7 +141,15 @@ export class SessionAggregator {
         break;
       case 'performing':
         this.totalScoredFrames++;
-        if (frameQuality >= 80) this.goodFrames++;
+        if (frameQuality >= 60) this.goodFrames++;
+
+        // Update EMA live score
+        if (this.emaScore === null) {
+          // First performing frame — seed the EMA with the actual score
+          this.emaScore = frameQuality;
+        } else {
+          this.emaScore = this.EMA_ALPHA * frameQuality + (1 - this.EMA_ALPHA) * this.emaScore;
+        }
         break;
     }
   }
@@ -167,7 +181,7 @@ export class SessionAggregator {
 
     const totalViolations = Object.values(this.violationCounts).reduce((s, c) => s + c, 0);
 
-    // Frame-quality based score â€” replaces the old penalty formula
+    // Frame-quality based score
     const performanceScore = calculatePerformanceScore(this.goodFrames, this.totalScoredFrames);
 
     const metrics: SessionMetrics = {
@@ -196,7 +210,7 @@ export class SessionAggregator {
       `[SessionAggregator] Stopped: ${this.session.sessionId} | ` +
       `${duration.toFixed(1)}s | ${this.totalFrames} frames | ` +
       `scored: ${this.totalScoredFrames} | good: ${this.goodFrames} | ` +
-      `score: ${performanceScore} | violations: ${totalViolations}`
+      `score: ${performanceScore ?? 'N/A'} | violations: ${totalViolations}`
     );
 
     this.session = null;
@@ -216,12 +230,20 @@ export class SessionAggregator {
     return Object.values(this.violationCounts).reduce((s, c) => s + c, 0);
   }
 
-  /** Live performance score during an active session */
-  getLiveScore(): number {
-    return calculatePerformanceScore(this.goodFrames, this.totalScoredFrames);
+  /**
+   * Live performance score during an active session.
+   * Uses EMA for smooth, responsive display.
+   * Returns null until enough data is collected.
+   */
+  getLiveScore(): number | null {
+    // Need at least some performing frames before showing a score
+    if (this.totalScoredFrames < 5 || this.emaScore === null) {
+      return null;
+    }
+    return Math.round(Math.max(0, Math.min(100, this.emaScore)));
   }
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─────────────────────────────────────────────────────────────
 
   private reset(): void {
     this.session = null;
@@ -239,6 +261,7 @@ export class SessionAggregator {
     this.goodFrames       = 0;
     this.noHumanFrames    = 0;
     this.idleFrames       = 0;
+    this.emaScore         = null;
   }
 
   private generateSessionId(): string {

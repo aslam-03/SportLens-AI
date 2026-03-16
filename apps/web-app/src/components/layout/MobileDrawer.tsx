@@ -78,15 +78,15 @@ export const MobileDrawer = ({ isOpen, onClose, currentUser, onLogout }: MobileD
             animate={{ x: 0 }}
             exit={{ x: '-100%' }}
             transition={{ type: 'tween', duration: 0.25 }}
-            className="lg:hidden fixed left-0 top-0 bottom-0 w-80 max-w-[85vw] bg-primary-700 shadow-2xl z-50 flex flex-col"
+            className="lg:hidden fixed left-0 top-0 bottom-0 w-80 max-w-[85vw] bg-navy-950 shadow-2xl z-50 flex flex-col"
           >
             {/* Header with Profile */}
-            <div className="flex-shrink-0 px-6 py-6 border-b border-primary-600/50">
+            <div className="flex-shrink-0 px-6 py-6 border-b border-navy-800">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-white">Menu</h2>
                 <button
                   onClick={onClose}
-                  className="p-2 rounded-lg text-gray-300 hover:bg-primary-600/50 hover:text-white transition-colors"
+                  className="p-2 rounded-lg text-gray-400 hover:bg-navy-900 hover:text-white transition-colors"
                   aria-label="Close menu"
                 >
                   <Icons.X size="md" />
@@ -128,8 +128,8 @@ export const MobileDrawer = ({ isOpen, onClose, currentUser, onLogout }: MobileD
                       'text-left text-sm font-medium transition-colors duration-150',
                       'focus:outline-none focus:ring-2 focus:ring-primary-400',
                       active
-                        ? 'bg-primary-600 text-white shadow-sm'
-                        : 'text-gray-300 hover:bg-primary-600/50 hover:text-white'
+                        ? 'bg-navy-900 text-white shadow-sm border-l-2 border-primary-500'
+                        : 'text-gray-400 hover:bg-navy-900 hover:text-white'
                     )}
                   >
                     <IconComponent size="md" />
@@ -139,11 +139,10 @@ export const MobileDrawer = ({ isOpen, onClose, currentUser, onLogout }: MobileD
               })}
             </nav>
 
-            {/* Logout Button */}
-            <div className="flex-shrink-0 border-t border-primary-600/50 p-3">
+            <div className="flex-shrink-0 border-t border-navy-800 p-3">
               <button
                 onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-gray-300 hover:bg-primary-600/50 hover:text-white transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-primary-400"
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-medium text-gray-400 hover:bg-navy-900 hover:text-white transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-primary-400"
               >
                 <Icons.LogOut size="md" />
                 <span>Log Out</span>

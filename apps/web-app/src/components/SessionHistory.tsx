@@ -118,7 +118,8 @@ export default function SessionHistory() {
   };
 
   // Get score color
-  const getScoreColor = (score: number): string => {
+  const getScoreColor = (score: number | null): string => {
+    if (score === null) return '#6b7280'; // Gray for N/A
     if (score >= 90) return '#10b981'; // Green
     if (score >= 70) return '#f59e0b'; // Amber
     return '#ef4444'; // Red
@@ -356,7 +357,7 @@ export default function SessionHistory() {
                     color: scoreColor,
                     marginRight: "16px"
                   }}>
-                    {session.metrics.performanceScore}
+                    {session.metrics.performanceScore ?? 'N/A'}
                   </div>
 
                   {/* Expand Icon */}

@@ -282,7 +282,7 @@ export default function ReportsDashboard() {
                 {formatTimestamp(item.startTime)} | {item.activityType}
               </span>
               <span style={{ fontSize: 13 }}>
-                {formatDuration(item.duration)} | Score {item.performanceScore}
+                {formatDuration(item.duration)} | Score {item.performanceScore ?? 'N/A'}
               </span>
             </button>
           ))}

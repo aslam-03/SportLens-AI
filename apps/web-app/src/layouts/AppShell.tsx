@@ -37,7 +37,7 @@ export const AppShell = ({ children, currentUser, onLogout }: AppShellProps) => 
   };
 
   return (
-    <div className="min-h-screen bg-primary-700">
+    <div className="min-h-screen bg-navy-950">
       {/* Desktop Sidebar - Fixed Left */}
       <Sidebar onLogout={onLogout} />
 

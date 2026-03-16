@@ -846,7 +846,7 @@ export default function LiveCoaching() {
         )}
 
         {/* ── Live Score Badge (shows while session is active) ───────── */}
-        {isSessionActive && liveScore !== null && detectionStatus === 'performing' && (
+        {isSessionActive && (
           <div style={{
             position: "absolute",
             top: 10,
@@ -854,18 +854,24 @@ export default function LiveCoaching() {
             zIndex: 10,
             padding: "6px 14px",
             borderRadius: "20px",
-            background: liveScore >= 80
-              ? "rgba(16,185,129,0.90)"
-              : liveScore >= 50
-                ? "rgba(234,179,8,0.90)"
-                : "rgba(239,68,68,0.90)",
+            background: liveScore === null
+              ? "rgba(100,116,139,0.85)"
+              : liveScore >= 75
+                ? "rgba(16,185,129,0.90)"
+                : liveScore >= 45
+                  ? "rgba(234,179,8,0.90)"
+                  : "rgba(239,68,68,0.90)",
             backdropFilter: "blur(4px)",
             display: "flex",
-            flexDirection: "column",
+            flexDirection: "column" as const,
             alignItems: "center",
           }}>
             <span style={{ fontSize: "10px", fontWeight: 600, color: "#fff", opacity: 0.85, lineHeight: 1 }}>SCORE</span>
-            <span style={{ fontSize: "22px", fontWeight: 800, color: "#fff", lineHeight: 1.1 }}>{liveScore}</span>
+            {liveScore !== null ? (
+              <span style={{ fontSize: "22px", fontWeight: 800, color: "#fff", lineHeight: 1.1 }}>{liveScore}</span>
+            ) : (
+              <span style={{ fontSize: "11px", fontWeight: 600, color: "rgba(255,255,255,0.8)", lineHeight: 1.3 }}>Warming up...</span>
+            )}
           </div>
         )}
 

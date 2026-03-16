@@ -113,6 +113,12 @@ export default function LiveCoaching() {
   const [isInitializing, setIsInitializing] = useState(false);
   const lastValidMetricsRef = useRef<Metric[]>([]);
   
+  // New State for Session Logic
+  const [showDurationModal, setShowDurationModal] = useState(false);
+  const [targetDurationMinutes, setTargetDurationMinutes] = useState('5');
+  const [targetDurationSeconds, setTargetDurationSeconds] = useState(0);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  
   // Rule engine and smoother instances
   const ruleEngineRef = useRef<RuleEngine | null>(null);
   const smootherRef = useRef<AngleSmoother>(new AngleSmoother(5));
@@ -194,6 +200,28 @@ export default function LiveCoaching() {
     }
     return () => clearInterval(interval);
   }, [isSessionActive]);
+
+  // Auto-stop session if target duration is reached
+  useEffect(() => {
+    if (isSessionActive && targetDurationSeconds > 0 && sessionTime >= targetDurationSeconds) {
+      handleStartStop();
+    }
+  }, [sessionTime, isSessionActive, targetDurationSeconds]);
+
+  // Countdown effect
+  useEffect(() => {
+    if (countdown === null) return;
+    
+    if (countdown > 0) {
+      const timer = setTimeout(() => {
+        setCountdown(countdown - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    } else {
+      setCountdown(null);
+      startActualSession();
+    }
+  }, [countdown]);
 
   // Handle pose detection results
   const handlePoseResults = (results: PoseLandmarks) => {
@@ -475,9 +503,19 @@ export default function LiveCoaching() {
       }
     };
   }, [isSessionActive, facingMode]);
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
+    
+    // Add remaining time display formatting if duration is set
+    if (targetDurationSeconds > 0 && isSessionActive) {
+      const remaining = Math.max(0, targetDurationSeconds - seconds);
+      const rmins = Math.floor(remaining / 60);
+      const rsecs = remaining % 60;
+      return `${rmins.toString().padStart(2, '0')}:${rsecs.toString().padStart(2, '0')}`;
+    }
+
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
@@ -972,32 +1010,47 @@ export default function LiveCoaching() {
       setCurrentMetrics([]);
       lastValidMetricsRef.current = [];
     } else {
-      // Start session
+      // Start session checks
       if (!selectedActivity) return;
       
-      setIsSessionActive(true);
-      setCurrentMetrics([]);
-      setRealTimeFeedback([]);
-      setCurrentBiomechanics(null);
-      lastValidMetricsRef.current = [];
-      setLiveScore(null);
-      setDetectionStatus('idle');
-      setDetectionMessage('');
-      
-      if (ruleEngineRef.current) {
-        ruleEngineRef.current.reset();
-      }
-      smootherRef.current.reset();
-      activityDetectorRef.current.reset();
-      pipelineRef.current.reset();
-      
-      // Start session aggregator
-      sessionAggregatorRef.current.startSession(selectedActivity.category);
-      sessionStartTimeRef.current = Date.now();
-      
-      // Start video recording
-      // Video recording will be started in accessCamera once the stream is ready
+      setShowDurationModal(true);
     }
+  };
+
+  const confirmStartSession = () => {
+    const mins = parseInt(targetDurationMinutes, 10);
+    if (!isNaN(mins) && mins > 0) {
+      setTargetDurationSeconds(mins * 60);
+    } else {
+      setTargetDurationSeconds(0);
+    }
+    setShowDurationModal(false);
+    setCountdown(5);
+  };
+
+  const startActualSession = () => {
+    setIsSessionActive(true);
+    setCurrentMetrics([]);
+    setRealTimeFeedback([]);
+    setCurrentBiomechanics(null);
+    lastValidMetricsRef.current = [];
+    setLiveScore(null);
+    setDetectionStatus('idle');
+    setDetectionMessage('');
+    
+    if (ruleEngineRef.current) {
+      ruleEngineRef.current.reset();
+    }
+    smootherRef.current.reset();
+    activityDetectorRef.current.reset();
+    pipelineRef.current.reset();
+    
+    // Start session aggregator
+    sessionAggregatorRef.current.startSession(selectedActivity!.category);
+    sessionStartTimeRef.current = Date.now();
+    
+    // Start video recording
+    // Video recording will be started in accessCamera once the stream is ready
   };
 
   // Stop and release camera stream
@@ -1028,176 +1081,110 @@ export default function LiveCoaching() {
     setSelectedActivity(null);
   };
 
-  // Convert biomechanics to display metrics
+  // Convert biomechanics to display metrics — production-grade ranges
   const updateMetricsFromBiomechanics = (biomechanics: BiomechanicsFrame) => {
     if (!selectedActivity) return;
 
     const metrics: Metric[] = [];
 
-    // Map activity-specific metrics
+    // Helper: score an angle against ideal range
+    const scoreAngle = (angle: number, idealMin: number, idealMax: number, toleranceOuter = 20): 'good' | 'warning' | 'critical' => {
+      if (angle >= idealMin && angle <= idealMax) return 'good';
+      const distFromIdeal = Math.min(Math.abs(angle - idealMin), Math.abs(angle - idealMax));
+      if (distFromIdeal <= toleranceOuter) return 'warning';
+      return 'critical';
+    };
+
     switch (selectedActivity.id) {
       case 'squat-form':
-      case 'lunge-form':
-        // Knee Angle
-        if (biomechanics.leftKneeAngle !== null) {
-          metrics.push({
-            label: 'Knee Angle',
-            value: Math.round(biomechanics.leftKneeAngle),
-            unit: '°',
-            status: biomechanics.leftKneeAngle >= 70 && biomechanics.leftKneeAngle <= 110 ? 'good' : 
-                   biomechanics.leftKneeAngle >= 60 && biomechanics.leftKneeAngle <= 120 ? 'warning' : 'critical'
-          });
+      case 'lunge-form': {
+        // Knee Angle — ideal squat depth 75-100°, warning ±20°
+        const kneeL = biomechanics.leftKneeAngle;
+        const kneeR = biomechanics.rightKneeAngle;
+        if (kneeL !== null) {
+          metrics.push({ label: 'L Knee', value: Math.round(kneeL), unit: '°', status: scoreAngle(kneeL, 75, 110) });
         }
-        
-        // Hip Depth
+        if (kneeR !== null) {
+          metrics.push({ label: 'R Knee', value: Math.round(kneeR), unit: '°', status: scoreAngle(kneeR, 75, 110) });
+        }
+        // Hip hinge — proper hip flexion 70-130°
         if (biomechanics.leftHipAngle !== null) {
-          metrics.push({
-            label: 'Hip Depth',
-            value: Math.round(biomechanics.leftHipAngle),
-            unit: '°',
-            status: biomechanics.leftHipAngle >= 100 && biomechanics.leftHipAngle <= 160 ? 'good' : 'warning'
-          });
+          metrics.push({ label: 'Hip Depth', value: Math.round(biomechanics.leftHipAngle), unit: '°', status: scoreAngle(biomechanics.leftHipAngle, 70, 130, 25) });
         }
-        
-        // Back Angle (shoulder angle indicates torso position)
+        // Torso — 50-90° indicates good upright posture
         if (biomechanics.leftShoulderAngle !== null) {
-          metrics.push({
-            label: 'Back Angle',
-            value: Math.round(biomechanics.leftShoulderAngle),
-            unit: '°',
-            status: biomechanics.leftShoulderAngle >= 50 && biomechanics.leftShoulderAngle <= 90 ? 'good' : 'warning'
-          });
+          metrics.push({ label: 'Torso', value: Math.round(biomechanics.leftShoulderAngle), unit: '°', status: scoreAngle(biomechanics.leftShoulderAngle, 50, 90) });
         }
         break;
+      }
 
-      case 'plank-hold':
-        // Body Alignment
+      case 'plank-hold': {
         if (biomechanics.leftHipAngle !== null && biomechanics.leftShoulderAngle !== null) {
-          const avgAlignment = (biomechanics.leftHipAngle + biomechanics.leftShoulderAngle) / 2;
-          metrics.push({
-            label: 'Alignment',
-            value: Math.round(avgAlignment),
-            unit: '°',
-            status: avgAlignment >= 150 && avgAlignment <= 180 ? 'good' : 'warning'
-          });
+          const avgAlign = (biomechanics.leftHipAngle + biomechanics.leftShoulderAngle) / 2;
+          metrics.push({ label: 'Alignment', value: Math.round(avgAlign), unit: '°', status: scoreAngle(avgAlign, 160, 180, 15) });
         }
-        
-        // Core Engagement (hip stability)
         if (biomechanics.leftHipAngle !== null && biomechanics.rightHipAngle !== null) {
-          const hipStability = 180 - Math.abs(biomechanics.leftHipAngle - biomechanics.rightHipAngle);
-          metrics.push({
-            label: 'Core Stability',
-            value: Math.round(hipStability),
-            unit: '%',
-            status: hipStability >= 95 ? 'good' : hipStability >= 85 ? 'warning' : 'critical'
-          });
+          const stability = Math.max(0, 100 - Math.abs(biomechanics.leftHipAngle - biomechanics.rightHipAngle) * 2);
+          metrics.push({ label: 'Core', value: Math.round(stability), unit: '%', status: stability >= 90 ? 'good' : stability >= 75 ? 'warning' : 'critical' });
         }
         break;
+      }
 
       case 'batting-stance':
       case 'bowling-action':
-      case 'fielding-position':
-        // Cricket activities - full body tracking
-        
-        // Stance/Balance
+      case 'fielding-position': {
         if (biomechanics.leftKneeAngle !== null && biomechanics.rightKneeAngle !== null) {
           const avgKnee = (biomechanics.leftKneeAngle + biomechanics.rightKneeAngle) / 2;
-          metrics.push({
-            label: 'Stance',
-            value: Math.round(avgKnee),
-            unit: '°',
-            status: avgKnee >= 140 && avgKnee <= 175 ? 'good' : 'warning'
-          });
+          metrics.push({ label: 'Stance', value: Math.round(avgKnee), unit: '°', status: scoreAngle(avgKnee, 140, 175) });
         }
-        
-        // Shoulder Alignment
         if (biomechanics.leftShoulderAngle !== null && biomechanics.rightShoulderAngle !== null) {
-          const shoulderDiff = Math.abs(biomechanics.leftShoulderAngle - biomechanics.rightShoulderAngle);
-          metrics.push({
-            label: 'Shoulders',
-            value: Math.round(100 - shoulderDiff),
-            unit: '%',
-            status: shoulderDiff < 10 ? 'good' : shoulderDiff < 20 ? 'warning' : 'critical'
-          });
+          const diff = Math.abs(biomechanics.leftShoulderAngle - biomechanics.rightShoulderAngle);
+          const symScore = Math.max(0, Math.round(100 - diff * 3));
+          metrics.push({ label: 'Shoulders', value: symScore, unit: '%', status: diff < 8 ? 'good' : diff < 18 ? 'warning' : 'critical' });
         }
-        
-        // Hip Rotation
         if (biomechanics.leftHipAngle !== null) {
-          metrics.push({
-            label: 'Hip Angle',
-            value: Math.round(biomechanics.leftHipAngle),
-            unit: '°',
-            status: biomechanics.leftHipAngle >= 140 && biomechanics.leftHipAngle <= 180 ? 'good' : 'warning'
-          });
+          metrics.push({ label: 'Hip', value: Math.round(biomechanics.leftHipAngle), unit: '°', status: scoreAngle(biomechanics.leftHipAngle, 140, 180) });
         }
-        
-        // Arm Angle (for bowling/batting)
         if (biomechanics.leftElbowAngle !== null) {
-          metrics.push({
-            label: 'Arm Angle',
-            value: Math.round(biomechanics.leftElbowAngle),
-            unit: '°',
-            status: 'good'
-          });
+          metrics.push({ label: 'Arm', value: Math.round(biomechanics.leftElbowAngle), unit: '°', status: scoreAngle(biomechanics.leftElbowAngle, 140, 180) });
         }
         break;
+      }
 
-      default:
-        // Generic metrics for other activities
+      default: {
         if (biomechanics.leftKneeAngle !== null) {
-          metrics.push({
-            label: 'Knee',
-            value: Math.round(biomechanics.leftKneeAngle),
-            unit: '°',
-            status: 'good'
-          });
+          metrics.push({ label: 'Knee', value: Math.round(biomechanics.leftKneeAngle), unit: '°', status: 'good' });
         }
         if (biomechanics.leftElbowAngle !== null) {
-          metrics.push({
-            label: 'Elbow',
-            value: Math.round(biomechanics.leftElbowAngle),
-            unit: '°',
-            status: 'good'
-          });
+          metrics.push({ label: 'Elbow', value: Math.round(biomechanics.leftElbowAngle), unit: '°', status: 'good' });
         }
+      }
     }
 
-    // Add balance/alignment metric if we have bilateral data
+    // Balance — bilateral symmetry
     if (biomechanics.leftKneeAngle !== null && biomechanics.rightKneeAngle !== null) {
       const diff = Math.abs(biomechanics.leftKneeAngle - biomechanics.rightKneeAngle);
-      metrics.push({
-        label: 'Balance',
-        value: Math.round(100 - diff),
-        unit: '%',
-        status: diff < 5 ? 'good' : diff < 10 ? 'warning' : 'critical'
-      });
+      const balScore = Math.max(0, Math.round(100 - diff * 3));
+      metrics.push({ label: 'Balance', value: balScore, unit: '%', status: diff < 5 ? 'good' : diff < 12 ? 'warning' : 'critical' });
     }
 
-    // Calculate overall posture/form score (percentage of metrics in good status)
-    if (metrics.length > 0) {
-      const goodMetrics = metrics.filter(m => m.status === 'good').length;
-      const totalMetrics = metrics.length;
-      const score = Math.round((goodMetrics / totalMetrics) * 100);
-      
-      metrics.unshift({
-        label: 'Form Score',
-        value: score,
-        unit: '%',
-        status: score >= 80 ? 'good' : score >= 60 ? 'warning' : 'critical'
-      });
+    // Use live EMA score from sessionAggregator when available
+    const emaScore = liveScore;
+    if (emaScore !== null) {
+      metrics.unshift({ label: 'Form Score', value: emaScore, unit: '%', status: emaScore >= 75 ? 'good' : emaScore >= 45 ? 'warning' : 'critical' });
+    } else if (metrics.length > 0) {
+      // Fallback: ratio-based form score
+      const goodCount = metrics.filter(m => m.status === 'good').length;
+      const ratio = Math.round((goodCount / metrics.length) * 100);
+      metrics.unshift({ label: 'Form Score', value: ratio, unit: '%', status: ratio >= 75 ? 'good' : ratio >= 45 ? 'warning' : 'critical' });
     }
 
-    // Always update metrics
     if (metrics.length > 0) {
-      // Store as last valid metrics
       lastValidMetricsRef.current = metrics;
       setCurrentMetrics(metrics);
     } else if (lastValidMetricsRef.current.length > 0) {
-      // If no new metrics but we have last valid ones, keep showing them
-      // This prevents metrics from disappearing when person temporarily moves out of frame
       setCurrentMetrics(lastValidMetricsRef.current);
     } else {
-      // No metrics at all yet
       setCurrentMetrics([]);
     }
   };
@@ -1269,6 +1256,84 @@ export default function LiveCoaching() {
   if (selectedActivity) {
     return (
       <div className="fixed inset-0 w-full h-full flex flex-col lg:flex-row overflow-hidden bg-black">
+        {/* Duration Selection Modal */}
+        <AnimatePresence>
+          {showDurationModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+            >
+              <Card variant="glass" className="w-full max-w-sm p-6 text-center">
+                <h3 className="text-xl font-bold text-white mb-2">Session Duration</h3>
+                <p className="text-gray-400 text-sm mb-6">How long do you want to train?</p>
+                
+                <div className="flex justify-center gap-3 mb-6">
+                  {[1, 5, 10, 15].map(min => (
+                    <button
+                      key={min}
+                      onClick={() => setTargetDurationMinutes(min.toString())}
+                      className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold transition-all ${
+                        targetDurationMinutes === min.toString()
+                          ? 'bg-primary-500 text-white shadow-lg shadow-primary-500/20 scale-110'
+                          : 'bg-navy-800 text-gray-400 hover:bg-navy-700'
+                      }`}
+                    >
+                      {min}
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="flex items-center justify-center gap-2 mb-6">
+                  <span className="text-gray-400 text-sm">Custom (min):</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="120"
+                    value={targetDurationMinutes}
+                    onChange={(e) => setTargetDurationMinutes(e.target.value)}
+                    className="bg-navy-900 border border-navy-700 rounded-lg px-3 py-2 text-white w-20 text-center focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none"
+                  />
+                </div>
+
+                <div className="flex gap-3">
+                  <Button variant="secondary" className="flex-1" onClick={() => setShowDurationModal(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" className="flex-1" onClick={confirmStartSession}>
+                    Start
+                  </Button>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Countdown Overlay */}
+        <AnimatePresence>
+          {countdown !== null && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-md"
+            >
+              <motion.div
+                key={countdown}
+                initial={{ scale: 0.5, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 1.5, opacity: 0 }}
+                transition={{ duration: 0.5 }}
+                className="w-48 h-48 rounded-full bg-primary-500/20 flex flex-col items-center justify-center border-4 border-primary-500 shadow-[0_0_50px_rgba(0,217,255,0.3)]"
+              >
+                <span className="text-7xl font-black text-white">{countdown > 0 ? countdown : 'Go!'}</span>
+                {countdown > 0 && <span className="text-primary-300 text-sm font-bold uppercase tracking-widest mt-2">{countdown === 5 ? 'Get ready' : 'Starting...'}</span>}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Camera Section */}
         <div className="flex-1 flex flex-col bg-black relative min-h-0">
           {/* Header with Back Button */}
@@ -1349,21 +1414,27 @@ export default function LiveCoaching() {
                 )}
 
                 {/* ── Live Score Badge ─── */}
-                {liveScore !== null && detectionStatus === 'performing' && (
+                {isSessionActive && (
                   <div
                     className="absolute top-20 right-4 z-20 flex flex-col items-center rounded-full px-4 py-2"
                     style={{
                       background:
-                        liveScore >= 80
-                          ? 'rgba(16,185,129,0.90)'
-                          : liveScore >= 50
-                            ? 'rgba(234,179,8,0.90)'
-                            : 'rgba(239,68,68,0.90)',
+                        liveScore === null
+                          ? 'rgba(100,116,139,0.85)'
+                          : liveScore >= 75
+                            ? 'rgba(16,185,129,0.90)'
+                            : liveScore >= 45
+                              ? 'rgba(234,179,8,0.90)'
+                              : 'rgba(239,68,68,0.90)',
                       backdropFilter: 'blur(4px)',
                     }}
                   >
                     <span className="text-[10px] font-semibold text-white/80 leading-none">SCORE</span>
-                    <span className="text-2xl font-extrabold text-white leading-tight">{liveScore}</span>
+                    {liveScore !== null ? (
+                      <span className="text-2xl font-extrabold text-white leading-tight">{liveScore}</span>
+                    ) : (
+                      <span className="text-sm font-semibold text-white/80 leading-tight">Warming up...</span>
+                    )}
                   </div>
                 )}
 
@@ -1433,30 +1504,30 @@ export default function LiveCoaching() {
                 {/* Floating Metrics (Mobile) */}
                 <div className="absolute bottom-4 left-4 right-4 lg:hidden z-10 max-h-56 overflow-y-auto">
                   {currentMetrics.length > 0 ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      {currentMetrics.map((metric, index) => (
-                        <motion.div
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {currentMetrics.map((metric) => (
+                        <div
                           key={metric.label}
-                          initial={{ opacity: 0, scale: 0.9 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{ delay: index * 0.05 }}
-                          className="bg-navy-900/95 backdrop-blur-md rounded-xl p-3 text-center border border-navy-700 shadow-lg"
+                          className="bg-navy-950/90 backdrop-blur-md rounded-lg px-3 py-2 border border-navy-800"
                         >
-                          <p className="text-gray-400 text-xs mb-1.5 font-medium truncate">{metric.label}</p>
-                          <div className="flex items-baseline justify-center gap-1">
-                            <p className={`text-2xl font-bold ${getStatusColor(metric.status)}`}>
+                          <p className="text-gray-500 text-[10px] uppercase tracking-wider font-semibold mb-0.5">{metric.label}</p>
+                          <div className="flex items-baseline gap-1">
+                            <p className={`text-lg font-bold ${getStatusColor(metric.status)}`}>
                               {metric.value}
                             </p>
-                            <span className="text-xs text-gray-500">{metric.unit}</span>
+                            <span className="text-[10px] text-gray-600">{metric.unit}</span>
+                            <span className={`ml-auto text-[9px] font-bold uppercase ${
+                              metric.status === 'good' ? 'text-emerald-500' :
+                              metric.status === 'warning' ? 'text-amber-400' : 'text-red-400'
+                            }`}>{metric.status === 'good' ? '✓' : metric.status === 'warning' ? '!' : '✗'}</span>
                           </div>
-                        </motion.div>
+                        </div>
                       ))}
                     </div>
                   ) : (
                     !isInitializing && (
-                      <div className="bg-navy-900/95 backdrop-blur-md rounded-xl p-4 text-center border border-navy-700 shadow-lg">
-                        <Icons.Activity size="md" className="text-gray-500 mx-auto mb-2" />
-                        <p className="text-gray-400 text-sm">Position yourself in frame</p>
+                      <div className="bg-navy-950/90 backdrop-blur-md rounded-lg p-4 text-center border border-navy-800">
+                        <p className="text-gray-500 text-sm">Position yourself in frame</p>
                       </div>
                     )
                   )}
@@ -1557,103 +1628,96 @@ export default function LiveCoaching() {
         </div>
 
         {/* Desktop Metrics Sidebar */}
-        <div className="hidden lg:flex lg:w-80 xl:w-96 bg-navy-900 border-l border-navy-800 flex-col overflow-hidden">
+        <div className="hidden lg:flex lg:w-80 xl:w-96 bg-navy-950 border-l border-navy-900 flex-col overflow-hidden">
           {/* Metrics Header */}
-          <div className="flex-shrink-0 p-6 border-b border-navy-800">
-            <h2 className="text-xl font-semibold text-white mb-2">Live Metrics</h2>
-            <p className="text-sm text-gray-400">Real-time biomechanics tracking</p>
+          <div className="flex-shrink-0 px-5 py-4 border-b border-navy-900">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-white">Live Metrics</h2>
+              {isSessionActive && (
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Tracking
+                </span>
+              )}
+            </div>
           </div>
 
           {/* Metrics List */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
             {currentMetrics.length > 0 ? (
-              currentMetrics.map((metric) => (
-                <motion.div
-                  key={metric.label}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className={`p-4 rounded-lg border ${
-                    metric.status === 'good'
-                      ? 'border-success-500/30 bg-success-500/5'
-                      : metric.status === 'warning'
-                      ? 'border-warning-500/30 bg-warning-500/5'
-                      : 'border-danger-500/30 bg-danger-500/5'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm text-gray-300 font-medium">{metric.label}</p>
-                    <Badge
-                      variant={
-                        metric.status === 'good'
-                          ? 'success'
-                          : metric.status === 'warning'
-                          ? 'warning'
-                          : 'default'
-                      }
-                      size="sm"
-                      className={metric.status === 'critical' ? 'bg-danger-500/20 text-danger-500 border-danger-500/30' : ''}
-                    >
-                      {metric.status || 'N/A'}
-                    </Badge>
+              currentMetrics.map((metric) => {
+                const isFormScore = metric.label === 'Form Score';
+                return (
+                  <div
+                    key={metric.label}
+                    className={`rounded-lg border px-4 py-3 ${
+                      isFormScore
+                        ? 'border-navy-800 bg-navy-900'
+                        : 'border-navy-900 bg-navy-950'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-gray-500 font-semibold uppercase tracking-wider">{metric.label}</p>
+                      <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                        metric.status === 'good' ? 'bg-emerald-500/15 text-emerald-400' :
+                        metric.status === 'warning' ? 'bg-amber-500/15 text-amber-400' :
+                        'bg-red-500/15 text-red-400'
+                      }`}>
+                        {metric.status === 'good' ? 'Good' : metric.status === 'warning' ? 'Fix' : 'Bad'}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-1 mt-1">
+                      <p className={`font-bold ${
+                        isFormScore ? 'text-2xl' : 'text-xl'
+                      } ${getStatusColor(metric.status)}`}>
+                        {metric.value}
+                      </p>
+                      <span className="text-xs text-gray-600">{metric.unit}</span>
+                    </div>
                   </div>
-                  <p className={`text-3xl font-bold ${getStatusColor(metric.status)}`}>
-                    {metric.value}
-                  </p>
-                </motion.div>
-              ))
+                );
+              })
             ) : (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <div className="p-4 bg-primary-500/10 rounded-full mb-4">
-                  <Icons.Activity size="lg" className="text-primary-400" />
+              <div className="flex flex-col items-center justify-center h-full text-center py-12">
+                <div className="w-10 h-10 rounded-full border-2 border-navy-800 flex items-center justify-center mb-3">
+                  <Icons.Activity size="md" className="text-gray-600" />
                 </div>
-                <p className="text-gray-400 text-sm">
-                  {isInitializing ? 'Initializing pose detection...' : 'Position yourself in frame to see metrics'}
+                <p className="text-gray-600 text-sm">
+                  {isInitializing ? 'Initializing pose detection...' : 'Position yourself in frame'}
                 </p>
               </div>
             )}
           </div>
 
-          {/* Feedback Panel (if active) */}
+          {/* AI Feedback Panel */}
           <AnimatePresence>
             {isSessionActive && realTimeFeedback.length > 0 && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: 20 }}
-                className="flex-shrink-0 border-t border-navy-800 bg-navy-950"
+                className="flex-shrink-0 border-t border-navy-900"
               >
-                <div className="p-6">
-                  <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                    <Icons.Info size="md" />
-                    AI Feedback
-                  </h3>
-                  <div className="space-y-3 max-h-48 overflow-y-auto">
+                <div className="px-4 py-3">
+                  <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2.5">AI Feedback</h3>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
                     {realTimeFeedback.map((feedback) => (
                       <div
                         key={feedback.id}
-                        className={`p-3 rounded-lg ${getStatusBg(feedback.type)}`}
+                        className={`px-3 py-2.5 rounded-lg border text-sm flex items-start gap-2.5 ${
+                          feedback.type === 'warning'
+                            ? 'border-amber-500/20 bg-amber-500/5'
+                            : feedback.type === 'success'
+                            ? 'border-emerald-500/20 bg-emerald-500/5'
+                            : 'border-navy-800 bg-navy-900'
+                        }`}
                       >
-                        <div className="flex items-start gap-2">
-                          {feedback.type === 'success' ? (
-                            <Icons.Check
-                              size="sm"
-                              className="text-success-500"
-                            />
-                          ) : feedback.type === 'warning' ? (
-                            <Icons.AlertTriangle
-                              size="sm"
-                              className="text-warning-500"
-                            />
-                          ) : (
-                            <Icons.Info
-                              size="sm"
-                              className="text-primary-500"
-                            />
-                          )}
-                          <div className="flex-1">
-                            <p className="text-sm text-text-primary">{feedback.message}</p>
-                            <p className="text-xs text-text-muted mt-1">{feedback.timestamp}</p>
-                          </div>
+                        <span className="text-base flex-shrink-0 mt-px">
+                          {feedback.type === 'success' ? '✓' : feedback.type === 'warning' ? '⚠' : 'ℹ'}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-gray-200 text-[13px] leading-snug">{feedback.message}</p>
+                          <p className="text-gray-600 text-[10px] mt-0.5">{feedback.timestamp}</p>
                         </div>
                       </div>
                     ))}
@@ -1674,103 +1738,101 @@ export default function LiveCoaching() {
       onLogout={handleLogout}
     >
       {/* Activity Selection Screen */}
-      <div className="min-h-screen bg-primary-700 py-8 px-4">
-          <div className="max-w-5xl mx-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mb-8"
-            >
-              <h1 className="text-3xl font-bold text-white mb-2">Select Activity</h1>
-              <p className="text-gray-300">Choose what you'd like to practice today</p>
-            </motion.div>
+      <div className="min-h-screen bg-navy-950 py-8 px-4">
+        <div className="max-w-5xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-10"
+          >
+            <h1 className="text-3xl font-bold text-white mb-1">Live Coaching</h1>
+            <p className="text-gray-500 text-sm">Select an activity to start AI-powered coaching</p>
+          </motion.div>
 
-            {/* Cricket Activities */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="mb-8"
-            >
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-                <Icons.Activity size="lg" />
-                Cricket Practice
-              </h2>
-              <div className="grid md:grid-cols-3 gap-4">
-                {activities.filter(a => a.category === 'cricket').map((activity) => {
-                  const IconComponent = Icons[activity.icon];
-                  return (
-                    <Card
-                      key={activity.id}
-                      className="p-6 cursor-pointer hover:border-primary-400 transition-all !bg-navy-800 border border-navy-700"
-                      onClick={() => handleSelectActivity(activity)}
-                      hoverable
-                    >
-                      <div className="flex items-start gap-4">
-                        <div className="p-3 bg-primary-500/10 rounded-lg">
-                          <IconComponent size="lg" className="text-primary-400" />
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-white mb-2">{activity.name}</h3>
-                          <p className="text-sm text-gray-400 mb-3">{activity.description}</p>
-                          <div className="flex flex-wrap gap-1">
-                            {activity.metrics.slice(0, 3).map((metric, idx) => (
-                              <Badge key={idx} variant="default" size="sm" className="text-xs">
-                                {metric}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </Card>
-                  );
-                })}
+          {/* Cricket Activities */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="mb-10"
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-1.5 rounded-md bg-primary-500/10">
+                <Icons.Activity size="md" className="text-primary-400" />
               </div>
-            </motion.div>
+              <h2 className="text-lg font-semibold text-white">Cricket Practice</h2>
+            </div>
+            <div className="grid md:grid-cols-3 gap-3">
+              {activities.filter(a => a.category === 'cricket').map((activity) => {
+                const IconComponent = Icons[activity.icon];
+                return (
+                  <button
+                    key={activity.id}
+                    className="text-left p-5 rounded-xl bg-navy-900 border border-navy-800 hover:border-primary-500/40 hover:bg-navy-900/80 transition-all group cursor-pointer"
+                    onClick={() => handleSelectActivity(activity)}
+                  >
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="p-2 rounded-lg bg-navy-800 group-hover:bg-primary-500/10 transition-colors">
+                        <IconComponent size="md" className="text-gray-400 group-hover:text-primary-400 transition-colors" />
+                      </div>
+                      <h3 className="text-base font-semibold text-white">{activity.name}</h3>
+                    </div>
+                    <p className="text-sm text-gray-500 mb-3 leading-relaxed">{activity.description}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {activity.metrics.slice(0, 3).map((metric, idx) => (
+                        <span key={idx} className="text-[10px] font-medium text-gray-500 bg-navy-800 px-2 py-0.5 rounded">
+                          {metric}
+                        </span>
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
 
-            {/* Fitness Activities */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-            >
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-                <Icons.TrendingUp size="lg" />
-                Fitness Training
-              </h2>
-              <div className="grid md:grid-cols-3 gap-4">
-                {activities.filter(a => a.category === 'fitness').map((activity) => {
-                  const IconComponent = Icons[activity.icon];
-                  return (
-                    <Card
-                      key={activity.id}
-                      className="p-6 cursor-pointer hover:border-primary-400 transition-all !bg-navy-800 border border-navy-700"
-                      onClick={() => handleSelectActivity(activity)}
-                      hoverable
-                    >
-                      <div className="flex items-start gap-4">
-                        <div className="p-3 bg-primary-500/10 rounded-lg">
-                          <IconComponent size="lg" className="text-primary-400" />
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-white mb-2">{activity.name}</h3>
-                          <p className="text-sm text-gray-400 mb-3">{activity.description}</p>
-                          <div className="flex flex-wrap gap-1">
-                            {activity.metrics.slice(0, 3).map((metric, idx) => (
-                              <Badge key={idx} variant="default" size="sm" className="text-xs">
-                                {metric}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </Card>
-                  );
-                })}
+          {/* Fitness Activities */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-1.5 rounded-md bg-emerald-500/10">
+                <Icons.TrendingUp size="md" className="text-emerald-400" />
               </div>
-            </motion.div>
-          </div>
+              <h2 className="text-lg font-semibold text-white">Fitness Training</h2>
+            </div>
+            <div className="grid md:grid-cols-3 gap-3">
+              {activities.filter(a => a.category === 'fitness').map((activity) => {
+                const IconComponent = Icons[activity.icon];
+                return (
+                  <button
+                    key={activity.id}
+                    className="text-left p-5 rounded-xl bg-navy-900 border border-navy-800 hover:border-emerald-500/40 hover:bg-navy-900/80 transition-all group cursor-pointer"
+                    onClick={() => handleSelectActivity(activity)}
+                  >
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="p-2 rounded-lg bg-navy-800 group-hover:bg-emerald-500/10 transition-colors">
+                        <IconComponent size="md" className="text-gray-400 group-hover:text-emerald-400 transition-colors" />
+                      </div>
+                      <h3 className="text-base font-semibold text-white">{activity.name}</h3>
+                    </div>
+                    <p className="text-sm text-gray-500 mb-3 leading-relaxed">{activity.description}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {activity.metrics.slice(0, 3).map((metric, idx) => (
+                        <span key={idx} className="text-[10px] font-medium text-gray-500 bg-navy-800 px-2 py-0.5 rounded">
+                          {metric}
+                        </span>
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </motion.div>
         </div>
+      </div>
     </AppShell>
   );
 }

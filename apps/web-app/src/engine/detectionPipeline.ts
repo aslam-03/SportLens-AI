@@ -310,7 +310,9 @@ export class DetectionPipeline {
     }
 
     // ── STAGE 8: Stability Buffer ────────────────────────────────
-    this.consecutiveValidFrames++;    this.consecutiveFailFrames = 0;  // good frame resets fail counter    const framesRemaining = Math.max(0, this.config.stabilityFrameCount - this.consecutiveValidFrames);
+    this.consecutiveValidFrames++;
+    this.consecutiveFailFrames = 0;  // good frame resets fail counter
+    const framesRemaining = Math.max(0, this.config.stabilityFrameCount - this.consecutiveValidFrames);
 
     if (this.consecutiveValidFrames >= this.config.stabilityFrameCount) {
       this.isStable = true;
